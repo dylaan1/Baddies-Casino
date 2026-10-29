@@ -546,6 +546,12 @@ class Round:
 
         self.dealer_revealed = False
         self.dealer_has_blackjack = False
+        # Whether the dealer's hand was played to completion: it is whenever a
+        # player hand is still live or a Dealer Buster bet is riding, and a
+        # dealer blackjack is complete as dealt -- otherwise the dealer stands
+        # pat on the two cards. Only a played-out hand can bust, so these are
+        # the rounds Dealer Buster's dealt/won counts are out of.
+        self.dealer_played_out = False
         self.peeked = False
         self.results: List[HandResult] = []
         self.side_bet_results: List[SideBetResult] = []
@@ -682,6 +688,7 @@ class Round:
         self._settle_insurance()
         if self.dealer_hand.is_blackjack:
             self.dealer_has_blackjack = True
+            self.dealer_played_out = True
             self.dealer_revealed = True
             self._settle_round()
             self.phase = Phase.SETTLED
@@ -934,6 +941,7 @@ class Round:
         # even if every player hand is already settled.
         buster_wagered = any(spot.side_bet_wagers.get("dealer_buster", 0.0) > 0 for spot in self.spots)
         need_dealer_play = any_live or buster_wagered
+        self.dealer_played_out = need_dealer_play
 
         if not need_dealer_play:
             self.dealer_revealed = True

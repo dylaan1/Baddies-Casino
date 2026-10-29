@@ -59,6 +59,10 @@ class Stats:
     # Same keying, but only counts an occurrence that actually paid out --
     # i.e. it happened *and* the player had a wager on that bet that round.
     sidebet_wins: Dict[str, int] = field(default_factory=dict)
+    # What those are out of, per bet: times it was dealt (each spot's starting hand; for Dealer Buster each dealer hand
+    # played out) and times it was bet on.
+    sidebet_hands: Dict[str, int] = field(default_factory=lambda: dict.fromkeys(("power_poker", "star21", "dealer_buster"), 0))
+    sidebet_bets: Dict[str, int] = field(default_factory=lambda: dict.fromkeys(("power_poker", "star21", "dealer_buster"), 0))
 
     # ---- Session ----
     hands_this_session: int = 0
@@ -138,6 +142,10 @@ class Stats:
         k = _OCCURRENCE_KEY.format(bet=bet_key, category=category_key)
         self.sidebet_wins[k] = self.sidebet_wins.get(k, 0) + 1
 
+    def record_sidebet_hand(self, bet_key: str, bets: int) -> None:
+        self.sidebet_hands[bet_key] += 1
+        self.sidebet_bets[bet_key] += bets
+
     def sidebet_win_count(self, bet_key: str, category_key: str) -> int:
         return self.sidebet_wins.get(_OCCURRENCE_KEY.format(bet=bet_key, category=category_key), 0)
 
@@ -209,6 +217,8 @@ class Stats:
         self.lifetime_dealer_buster_pl = 0.0
         self.sidebet_occurrences = {}
         self.sidebet_wins = {}
+        self.sidebet_hands = dict.fromkeys(self.sidebet_hands, 0)
+        self.sidebet_bets = dict.fromkeys(self.sidebet_bets, 0)
 
     def ev_percent(self) -> Optional[float]:
         if self.lifetime_main_wagered <= 0:
