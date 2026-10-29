@@ -114,7 +114,7 @@ g.send(" ", 0.6)
 
 check(quit_game(g), "clean exit")
 c = db(home)
-check(c.execute("pragma integrity_check").fetchone()[0] == "ok" and c.execute("pragma user_version").fetchone()[0] == 3, "database intact, schema v3")
+check(c.execute("pragma integrity_check").fetchone()[0] == "ok" and c.execute("pragma user_version").fetchone()[0] == 4, "database intact, schema v4")
 rows = c.execute("select card_order, retired_at from shoes").fetchall()
 check(all("|" in r[0] and r[1] for r in rows), f"every shoe retired with its '|' marker ({len(rows)} shoes)")
 check(c.execute("select count(*) from hands").fetchone()[0] >= 3 and c.execute("select count(*) from hands where reshuffled_mid_round=1").fetchone()[0] == 0,

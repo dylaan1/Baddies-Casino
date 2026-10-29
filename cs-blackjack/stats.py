@@ -17,7 +17,7 @@ class Stats:
     game shows if the database can't be opened.
 
     Lifetime: P/L broken out by main wagers, side bets overall, and Power
-    Poker/Star 21 individually; EV% (realized edge on main blackjack wagers
+    Poker/Star 21/Dealer Buster individually; EV% (realized edge on main blackjack wagers
     only -- side bets have very different variance and would muddy that
     number); win/loss/push/surrender tallies; total hands ever played;
     sessions played; and, for every payout category across all three side
@@ -29,11 +29,11 @@ class Stats:
     "<sidebet> <category> <payout>" command) is priced the way you want it.
 
     Session (this session only): win/loss/push/surrender/double/split
-    tallies, aces- and tens-split counts, Dealer Pulled 21s (the dealer
-    hitting to a non-blackjack 21), player/dealer blackjacks dealt, shoes
-    played, dealer busts, the player's current win/loss streak (consecutive
-    hands, push/surrender leave it unchanged) and the longest win and loss
-    streaks reached.
+    tallies, aces- and tens-split counts, player/dealer blackjacks dealt,
+    Dealer 21s (every round the dealer's hand made 21, blackjacks included),
+    shoes played (in quarter shoes, starting from 0), dealer busts, the player's current streak (consecutive
+    hands with the same result -- win, loss or push; a surrender leaves it
+    unchanged) and the longest win, loss and push streaks reached.
     """
 
     # ---- Lifetime ----
@@ -49,6 +49,7 @@ class Stats:
     lifetime_sidebet_pl: float = 0.0
     lifetime_power_poker_pl: float = 0.0
     lifetime_star21_pl: float = 0.0
+    lifetime_dealer_buster_pl: float = 0.0
 
     # "<bet_key>:<category_key>" -> lifetime occurrence count, e.g.
     # "star21:suited777d" -- covers every category on all three payout
@@ -68,15 +69,19 @@ class Stats:
     tens_split: int = 0  # times the player split a pair of ten-value cards
     player_blackjacks: int = 0
     dealer_blackjacks: int = 0
-    greg_specials: int = 0  # "Dealer Pulled 21s" -- dealer hits their hand up to a non-blackjack 21
+    dealer_21s: int = 0  # rounds the dealer's hand made 21, blackjacks included
     dealer_busts: int = 0
-    # Consecutive player_win/dealer_win hands (push/surrender don't touch
-    # it): positive N = an N-hand win streak, negative N = an N-hand losing
-    # streak, 0 = no streak yet this session. Displayed as "W2"/"L3"/"-".
+    # The run of consecutive hands with the same result the player is on:
+    # current_streak_kind is "W" (wins), "L" (losses) or "P" (pushes), and
+    # current_streak how many in a row -- a surrender doesn't touch it, and
+    # it's ("", 0) until the session's first win/loss/push. Displayed as
+    # "W2"/"L3"/"P1"/"-".
+    current_streak_kind: str = ""
     current_streak: int = 0
-    longest_win_streak: int = 0  # best current_streak reached this session
-    longest_loss_streak: int = 0  # worst (as a positive count) current_streak reached this session
-    shoes_played: int = 0
+    longest_win_streak: int = 0  # longest "W" streak reached this session
+    longest_loss_streak: int = 0  # longest "L" streak reached this session
+    longest_push_streak: int = 0  # longest "P" streak reached this session
+    shoes_played: float = 0.0  # in quarter shoes, each by how far it got toward its cut card (see HistoryDB._shoes_played)
 
     session_main_pl: float = 0.0
     session_sidebet_pl: float = 0.0

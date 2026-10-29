@@ -2,6 +2,7 @@
 state file -- never anyone's real one), how the import combines with what the database already holds, the
 incremental lifetime cache against a full rescan, session vs lifetime figures, and the removed hardreset."""
 import json
+import math
 import random
 from pathlib import Path
 
@@ -134,6 +135,22 @@ s, hist = open_game()
 check(s.stats.hands_lifetime == db_hands, f"an older total below what the database already holds imports nothing for it, never a negative ({s.stats.hands_lifetime} vs {db_hands})")
 hist.close(s)
 
+S.reset_data()                                                # Dealer Buster P/L: a figure the older version never kept
+s, hist = open_game()
+s.rules.dealer_buster.enabled = True
+s.rules.dealer_buster.max_bet = 100
+s.side_bet_wagers[0]["dealer_buster"] = 5
+play(s, 40, seed=9)
+db_buster = hist.conn.execute("select sum(dealer_buster_pl) from hands").fetchone()[0]
+hist.close(s)
+Path(persist.STATE_PATH).write_text(json.dumps(LEGACY))       # its stats block has no lifetime_dealer_buster_pl
+s, hist = open_game()
+check(db_buster != 0 and abs(s.stats.lifetime_dealer_buster_pl - db_buster) < 1e-9,
+      f"Dealer Buster P/L is just what the database logged ({db_buster:+.2f}), not offset by an import: {s.stats.lifetime_dealer_buster_pl:+.2f}")
+check(hist.conn.execute("select count(*) from imported_stats where stat_key = 'lifetime_dealer_buster_pl'").fetchone()[0] == 0,
+      "...and the import stored no Buster figure at all")
+hist.close(s)
+
 # ------------------------------------------------------------------ negative money figures survive the import (regression)
 S.reset_data()
 neg = json.loads(json.dumps(LEGACY))
@@ -174,7 +191,7 @@ first_session_hands = s.stats.hands_this_session
 check(first_session_hands > 0 and s.stats.hands_lifetime == 1000 + first_session_hands, "session hands count only this session; lifetime adds them to the baseline")
 lifetime_before = s.stats.hands_lifetime
 s.reset_session()
-check(s.stats.hands_this_session == 0 and s.stats.shoes_played == 1 and s.stats.hands_lifetime == lifetime_before,
+check(s.stats.hands_this_session == 0 and s.stats.shoes_played == 0 and s.stats.hands_lifetime == lifetime_before,
       "newsession: the session panel starts over, lifetime is untouched")
 check(s.stats.sessions_played == 12 + 2, f"...and sessions played went up by one ({s.stats.sessions_played})")
 play(s, 10, seed=14)
@@ -204,6 +221,34 @@ s_new.ensure_shoe_ready()
 check(s_new.stats.hands_lifetime == 0 and s_new.stats.lifetime_main_pl == 0 and s_new.stats.sessions_played == 1, "a brand-new database file shows lifetime zero, while the old database is untouched")
 check(hist.path != hist_new.path and history.HistoryDB.open().conn.execute("select count(*) from hands").fetchone()[0] > 0, "...the original file still holds all its hands")
 hist_new.close(s_new)
+
+# ------------------------------------------------------------------ shoes played: quarter shoes, from 0
+S.reset_data()
+s, hist = open_game()
+check(s.stats.shoes_played == 0, f"a new session has played 0 shoes ({s.stats.shoes_played})")
+rng, seen, cuts = random.Random(5), [s.stats.shoes_played], 0
+while cuts < 2:
+    s.wagers[0] = 10
+    r, err = S.play_round(s, rng, "basic")
+    assert r, err
+    hist.record_round(s, r)
+    if s.ensure_shoe_ready():
+        cuts += 1
+        check(s.stats.shoes_played == cuts, f"when shoe {cuts} is cut at its cut card, shoes played is exactly {cuts:.2f} ({s.stats.shoes_played})")
+    seen.append(s.stats.shoes_played)
+check(all(v * 4 == int(v * 4) for v in seen) and seen == sorted(seen), "it only ever moves up, in quarter steps")
+check({0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0} <= set(seen), f"...through 0.25, 0.50, 0.75, 1.00, 1.25, ... ({sorted(set(seen))})")
+while s.shoe.cards_dealt < 0.3 * s.shoe.effective_penetration * s.shoe.total_cards:
+    s.wagers[0] = 10
+    r, err = S.play_round(s, rng, "basic")
+    hist.record_round(s, r)
+part = s.shoe.cards_dealt / (s.shoe.effective_penetration * s.shoe.total_cards)
+s.reset_shoe("newshoe")
+check(s.stats.shoes_played == math.floor((2 + part) * 4) / 4,
+      f"a shoe replaced early ('newshoe') counts only the part played: 2 + {part:.2f} -> {s.stats.shoes_played}")
+s.reset_session()
+check(s.stats.shoes_played == 0, "a new session starts again from 0")
+hist.close(s)
 
 # ------------------------------------------------------------------ what counts: abandoned rounds, side bets
 S.reset_data()

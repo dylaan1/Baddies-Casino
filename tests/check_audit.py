@@ -53,12 +53,12 @@ def feed_oracle(o, r):
     for res in r.side_bet_results:
         if res.win_amount > 0 and res.bet_key != "insurance":
             o.record_sidebet_win(res.bet_key, res.category_key)
-        o.record_side_bet(res.wager, res.win_amount, bet_key=res.bet_key if res.bet_key in ("power_poker", "star21") else None)
+        o.record_side_bet(res.wager, res.win_amount, bet_key=res.bet_key if res.bet_key != "insurance" else None)
     d = r.dealer_hand
     if d.is_blackjack:
         o.record_dealer_blackjack()
-    elif not d.is_bust and d.best_value == 21:
-        o.record_greg_special()
+    if not d.is_bust and d.best_value == 21:      # blackjacks included
+        o.record_dealer_21()
     if d.is_bust:
         o.record_dealer_bust()
 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     print(f"rows {rows_n} | resets {dict(resets)} | rounds {rounds} | failsafe rounds flagged {flagged_rounds} | mid_round shoe rows {mid_shoes}")
     check(q("pragma integrity_check")[0][0] == "ok", "integrity")
     check(q("pragma foreign_key_check") == [], "foreign keys")
-    check(q("pragma user_version")[0][0] == history.SCHEMA_VERSION == 3, "schema version")
+    check(q("pragma user_version")[0][0] == history.SCHEMA_VERSION == 4, "schema version")
 
     # 1. bankroll conservation
     bad = 0
@@ -226,8 +226,9 @@ if __name__ == "__main__":
             for col, want in (("hands_played", o.hands_this_session), ("hands_won", o.session_player_wins), ("hands_lost", o.session_dealer_wins),
                               ("hands_pushed", o.session_pushes), ("hands_surrendered", o.surrenders), ("doubles", o.doubles), ("splits", o.splits),
                               ("aces_split", o.aces_split), ("tens_split", o.tens_split), ("player_blackjacks", o.player_blackjacks),
-                              ("dealer_blackjacks", o.dealer_blackjacks), ("dealer_pulled_21s", o.greg_specials), ("dealer_busts", o.dealer_busts),
-                              ("longest_win_streak", o.longest_win_streak), ("longest_loss_streak", o.longest_loss_streak)):
+                              ("dealer_blackjacks", o.dealer_blackjacks), ("dealer_21s", o.dealer_21s), ("dealer_busts", o.dealer_busts),
+                              ("longest_win_streak", o.longest_win_streak), ("longest_loss_streak", o.longest_loss_streak),
+                              ("longest_push_streak", o.longest_push_streak)):
                 check(sess[col] == want, f"session {sess['session_id']} {col}: db {sess[col]} vs oracle {want}")
             check(abs(sess["main_pl"] - o.session_main_pl) < 1e-6 and abs(sess["sidebet_pl"] - o.session_sidebet_pl) < 1e-6, f"session {sess['session_id']} P/L vs oracle")
 
@@ -253,7 +254,8 @@ if __name__ == "__main__":
     pre, oracle = PRE["stats"], PRE["oracle"]
     for f in ("hands_lifetime", "player_wins", "dealer_wins", "pushes", "surrenders_lifetime"):
         check(getattr(pre, f) == getattr(oracle, f), f"lifetime {f}: {getattr(pre, f)} vs {getattr(oracle, f)}")
-    for f in ("lifetime_main_wagered", "lifetime_main_pl", "lifetime_sidebet_pl", "lifetime_power_poker_pl", "lifetime_star21_pl"):
+    for f in ("lifetime_main_wagered", "lifetime_main_pl", "lifetime_sidebet_pl", "lifetime_power_poker_pl", "lifetime_star21_pl",
+              "lifetime_dealer_buster_pl"):
         check(abs(getattr(pre, f) - getattr(oracle, f)) < 1e-6, f"lifetime {f}")
     check(pre.sidebet_occurrences == oracle.sidebet_occurrences and pre.sidebet_wins == oracle.sidebet_wins, "side-bet occurrences/wins vs oracle")
 

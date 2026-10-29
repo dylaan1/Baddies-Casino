@@ -28,11 +28,12 @@ class Stats:
     "<sidebet> <category> <payout>" command) is priced the way you want it.
 
     Session (reset every 'newsession'/hardreset): win/loss/push/surrender/
-    double/split tallies, aces- and tens-split counts, Dealer Pulled 21s
-    (the dealer hitting to a non-blackjack 21), player/dealer blackjacks
-    dealt, shoes played, dealer busts, and the player's current win/loss
-    streak (consecutive hands, push/surrender leave it unchanged) along with
-    the longest win and loss streaks reached this session.
+    double/split tallies, aces- and tens-split counts, Dealer 21s (every
+    round the dealer's hand made 21, blackjacks included), player/dealer
+    blackjacks dealt, shoes played, dealer busts, and the player's current
+    streak (consecutive hands with the same result -- win, loss or push; a
+    surrender leaves it unchanged) along with the longest win, loss and push
+    streaks reached this session.
     """
 
     # ---- Lifetime ----
@@ -48,6 +49,7 @@ class Stats:
     lifetime_sidebet_pl: float = 0.0
     lifetime_power_poker_pl: float = 0.0
     lifetime_star21_pl: float = 0.0
+    lifetime_dealer_buster_pl: float = 0.0
 
     # "<bet_key>:<category_key>" -> lifetime occurrence count, e.g.
     # "star21:suited777d" -- covers every category on all three payout
@@ -67,14 +69,15 @@ class Stats:
     tens_split: int = 0  # times the player split a pair of ten-value cards
     player_blackjacks: int = 0
     dealer_blackjacks: int = 0
-    greg_specials: int = 0  # "Dealer Pulled 21s" -- dealer hits their hand up to a non-blackjack 21
+    dealer_21s: int = 0  # rounds the dealer's hand made 21, blackjacks included
     dealer_busts: int = 0
-    # Consecutive player_win/dealer_win hands (push/surrender don't touch
-    # it): positive N = an N-hand win streak, negative N = an N-hand losing
-    # streak, 0 = no streak yet this session. Displayed as "W2"/"L3"/"-".
+    # The current run of identical results: kind "W"/"L"/"P" and its length
+    # (a surrender doesn't touch it; ("", 0) before the first result).
+    current_streak_kind: str = ""
     current_streak: int = 0
-    longest_win_streak: int = 0  # best current_streak reached this session
-    longest_loss_streak: int = 0  # worst (as a positive count) current_streak reached this session
+    longest_win_streak: int = 0
+    longest_loss_streak: int = 0
+    longest_push_streak: int = 0
     shoes_played: int = 1
 
     session_main_pl: float = 0.0
@@ -93,19 +96,25 @@ class Stats:
         if outcome == "player_win":
             self.player_wins += 1
             self.session_player_wins += 1
-            self.current_streak = self.current_streak + 1 if self.current_streak >= 0 else 1
+            self._extend_streak("W")
             self.longest_win_streak = max(self.longest_win_streak, self.current_streak)
         elif outcome == "dealer_win":
             self.dealer_wins += 1
             self.session_dealer_wins += 1
-            self.current_streak = self.current_streak - 1 if self.current_streak <= 0 else -1
-            self.longest_loss_streak = max(self.longest_loss_streak, -self.current_streak)
+            self._extend_streak("L")
+            self.longest_loss_streak = max(self.longest_loss_streak, self.current_streak)
         elif outcome == "push":
             self.pushes += 1
             self.session_pushes += 1
+            self._extend_streak("P")
+            self.longest_push_streak = max(self.longest_push_streak, self.current_streak)
         elif outcome == "surrender":
             self.surrenders += 1
             self.surrenders_lifetime += 1
+
+    def _extend_streak(self, kind: str) -> None:
+        self.current_streak = self.current_streak + 1 if kind == self.current_streak_kind else 1
+        self.current_streak_kind = kind
 
     def record_side_bet(self, wager: float, win_amount: float, bet_key: Optional[str] = None) -> None:
         pl = win_amount - wager
@@ -115,6 +124,8 @@ class Stats:
             self.lifetime_power_poker_pl += pl
         elif bet_key == "star21":
             self.lifetime_star21_pl += pl
+        elif bet_key == "dealer_buster":
+            self.lifetime_dealer_buster_pl += pl
 
     def record_sidebet_occurrence(self, bet_key: str, category_key: str) -> None:
         k = _OCCURRENCE_KEY.format(bet=bet_key, category=category_key)
@@ -148,8 +159,8 @@ class Stats:
     def record_dealer_blackjack(self) -> None:
         self.dealer_blackjacks += 1
 
-    def record_greg_special(self) -> None:
-        self.greg_specials += 1
+    def record_dealer_21(self) -> None:
+        self.dealer_21s += 1
 
     def record_dealer_bust(self) -> None:
         self.dealer_busts += 1
@@ -168,11 +179,13 @@ class Stats:
         self.tens_split = 0
         self.player_blackjacks = 0
         self.dealer_blackjacks = 0
-        self.greg_specials = 0
+        self.dealer_21s = 0
         self.dealer_busts = 0
+        self.current_streak_kind = ""
         self.current_streak = 0
         self.longest_win_streak = 0
         self.longest_loss_streak = 0
+        self.longest_push_streak = 0
         self.shoes_played = 1
         self.session_main_pl = 0.0
         self.session_sidebet_pl = 0.0
@@ -193,6 +206,7 @@ class Stats:
         self.lifetime_sidebet_pl = 0.0
         self.lifetime_power_poker_pl = 0.0
         self.lifetime_star21_pl = 0.0
+        self.lifetime_dealer_buster_pl = 0.0
         self.sidebet_occurrences = {}
         self.sidebet_wins = {}
 
