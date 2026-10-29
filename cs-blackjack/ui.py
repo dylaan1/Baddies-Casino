@@ -182,6 +182,13 @@ CONTENT_HEIGHT = (
 MIN_LINES = CONTENT_HEIGHT + 2
 
 RETURN_KEYS = {10, 13, curses.KEY_ENTER}
+# How long getch() waits for a key before returning -1, so the main loop can
+# redraw during idle time (see _main).
+INPUT_TIMEOUT_MS = 200
+# What _read_key returns when the terminal reports that the game's window or
+# tab has come to the front / gone to the back -- never a real key code.
+KEY_FOCUS_IN = -2
+KEY_FOCUS_OUT = -3
 ACTION_HINTS = [
     ("hit", "SPACE Hit"),
     ("stand", "RETURN Stand"),
@@ -1457,6 +1464,35 @@ def render_too_small(stdscr) -> None:
     stdscr.refresh()
 
 
+def _read_key(stdscr) -> int:
+    """stdscr.getch(), except that the terminal's focus reports -- ESC [ I
+    when the game's window or tab comes back to the front, ESC [ O when it
+    goes to the back (switched on in run()) -- come back as KEY_FOCUS_IN /
+    KEY_FOCUS_OUT instead of three separate keys. A real Esc press is
+    returned as 27, as before."""
+    ch = stdscr.getch()
+    if ch != 27:
+        return ch
+    # The rest of a focus report arrives together with its ESC, so it's
+    # already waiting; don't block for more.
+    stdscr.timeout(0)
+    try:
+        nxt = stdscr.getch()
+        if nxt == ord("["):
+            last = stdscr.getch()
+            if last == ord("I"):
+                return KEY_FOCUS_IN
+            if last == ord("O"):
+                return KEY_FOCUS_OUT
+            if last != -1:
+                curses.ungetch(last)
+        if nxt != -1:
+            curses.ungetch(nxt)  # (pushed back after `last`, so it's read first)
+        return 27
+    finally:
+        stdscr.timeout(INPUT_TIMEOUT_MS)
+
+
 def _render_overlay_lines(stdscr, title: str, lines: List[str]) -> None:
     """Full-screen text overlay, one key press to dismiss. Content taller
     than the terminal is split into pages -- any key shows the next, and
@@ -1465,18 +1501,30 @@ def _render_overlay_lines(stdscr, title: str, lines: List[str]) -> None:
     per_page = max(1, max_y - 4)  # rows 2 .. max_y - 3; row max_y - 1 is the footer
     pages = [lines[i : i + per_page] for i in range(0, len(lines), per_page)] or [[]]
     for page_no, page in enumerate(pages, start=1):
-        stdscr.erase()
-        page_title = title if len(pages) == 1 else f"{title}  (page {page_no}/{len(pages)})"
-        _safe_addstr(stdscr, 0, 2, page_title, curses.A_BOLD)
-        for i, line in enumerate(page):
-            is_header = bool(line) and not line.startswith(" ")
-            _safe_addstr(stdscr, 2 + i, 2, line, curses.A_BOLD if is_header else curses.A_NORMAL)
-        footer = "Press any key to return..." if page_no == len(pages) else "Press any key for the next page..."
-        _safe_addstr(stdscr, max_y - 1, 2, footer, curses.A_DIM)
-        stdscr.refresh()
-        ch = stdscr.getch()
-        while ch == -1:  # stdscr is in timeout() mode for the main loop's idle
-            ch = stdscr.getch()  # redraws; a real "any key" wait needs to skip those
+        while True:
+            stdscr.erase()
+            page_title = title if len(pages) == 1 else f"{title}  (page {page_no}/{len(pages)})"
+            _safe_addstr(stdscr, 0, 2, page_title, curses.A_BOLD)
+            for i, line in enumerate(page):
+                is_header = bool(line) and not line.startswith(" ")
+                _safe_addstr(stdscr, 2 + i, 2, line, curses.A_BOLD if is_header else curses.A_NORMAL)
+            footer = "Press any key to return..." if page_no == len(pages) else "Press any key for the next page..."
+            _safe_addstr(stdscr, max_y - 1, 2, footer, curses.A_DIM)
+            stdscr.refresh()
+            ch = _read_key(stdscr)
+            # stdscr is in timeout() mode for the main loop's idle redraws, and
+            # the window going to the back isn't a key press either: a real
+            # "any key" wait skips both.
+            while ch in (-1, KEY_FOCUS_OUT):
+                ch = _read_key(stdscr)
+            if ch != KEY_FOCUS_IN:
+                break
+            stdscr.clearok(True)  # back in front: repaint this page from scratch (see _main's KEY_FOCUS_IN)
+    # Nothing of the overlay may survive it: the game's next frame is painted
+    # from scratch, not just where curses thinks it differs from the overlay
+    # -- if the terminal moved the overlay's text while it was up, curses
+    # wouldn't know where to erase it.
+    stdscr.clearok(True)
 
 
 def render_help_screen(stdscr) -> None:
@@ -1959,7 +2007,7 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
     # animation), not only when the player presses a key. getch() returns
     # -1 on timeout; every branch below that only acts on specific keys
     # already ignores -1, and it's bailed out of immediately besides.
-    stdscr.timeout(200)
+    stdscr.timeout(INPUT_TIMEOUT_MS)
     init_colors()
     try:
         curses.mousemask(curses.ALL_MOUSE_EVENTS)
@@ -2097,9 +2145,11 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
             lines, cols = stdscr.getmaxyx()
             if lines < MIN_LINES or cols < MIN_COLS:
                 render_too_small(stdscr)
-                ch = stdscr.getch()
+                ch = _read_key(stdscr)
                 if ch in (ord("q"), ord("Q")):
                     break
+                if ch == KEY_FOCUS_IN:
+                    stdscr.clearok(True)
                 continue
 
             bet_col = min(max(bet_col, 0), NUM_SPOT_COLUMNS - 1)
@@ -2116,9 +2166,19 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
                 shoe_message_started_at = None
 
             cell_rects = render(stdscr, session, round_, buffer, message, bet_row, bet_col, bet_edit_buffer, input_focus)
-            ch = stdscr.getch()
+            ch = _read_key(stdscr)
 
-            if ch == -1:  # idle timeout tick, no real key -- just loop back and redraw
+            if ch in (-1, KEY_FOCUS_OUT):  # idle timeout tick (or the window going to the back), no real key -- just loop back and redraw
+                continue
+
+            if ch == KEY_FOCUS_IN:
+                # The game's window/tab is back in front. While it was behind,
+                # the terminal may have moved what's on screen without telling
+                # the game (Terminal.app shifts a background tab's text up when
+                # the window shrinks, e.g. on leaving full screen) -- curses,
+                # which only redraws what it thinks has changed, would then
+                # leave stale cards and text in place. Repaint all of it.
+                stdscr.clearok(True)
                 continue
 
             if ch == curses.KEY_RESIZE:
@@ -2448,13 +2508,25 @@ def run(db_path: Optional[Path] = None) -> None:
         sig = getattr(signal, name, None)
         if sig is not None:
             signal.signal(sig, _exit_on_signal)
+    # Best-effort request to maximize/fullscreen the terminal (xterm and many
+    # compatible emulators honor this control sequence; unsupported terminals
+    # simply ignore it). Sent before curses takes over the screen so an
+    # unsupported terminal has nothing visible to leak. Then: ask to be told
+    # when the window/tab gains or loses focus (see _read_key), so the screen
+    # can be repainted when the player comes back to it.
+    _write_terminal("\x1b[9;1t\x1b[?1004h")
     try:
-        # Best-effort request to maximize/fullscreen the terminal (xterm and
-        # many compatible emulators honor this control sequence; unsupported
-        # terminals simply ignore it). Sent before curses takes over the
-        # screen so an unsupported terminal has nothing visible to leak.
-        sys.stdout.write("\x1b[9;1t")
+        curses.wrapper(_main, db_path)
+    finally:
+        # Focus reporting outlives the program unless it's switched off: the
+        # shell would print ^[[I / ^[[O every time the window changed focus.
+        _write_terminal("\x1b[?1004l")
+
+
+def _write_terminal(sequence: str) -> None:
+    """Send a control sequence straight to the terminal, outside curses."""
+    try:
+        sys.stdout.write(sequence)
         sys.stdout.flush()
     except Exception:
         pass
-    curses.wrapper(_main, db_path)
