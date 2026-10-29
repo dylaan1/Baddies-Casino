@@ -236,7 +236,7 @@ s4.reset_session()
 s4.reset_session()
 check(n_rows(h4, "sessions") == sessions_before + 2, "each newsession opens a new session row")
 check(n_rows(h4) >= 10, "newsession does not wipe the hand log")
-check(s4.stats.hands_lifetime == hands_before and s4.stats.hands_this_session == 0 and s4.stats.shoes_played == 1,
+check(s4.stats.hands_lifetime == hands_before and s4.stats.hands_this_session == 0 and s4.stats.shoes_played == 0,
       "after newsession: lifetime unchanged (it comes from the database), the session panel starts over")
 check(h4.conn.execute("select count(*) from sessions where end_reason='newsession'").fetchone()[0] >= 2, "end reasons recorded")
 check(h4.conn.execute("select count(*) from shoes where session_id is null").fetchone()[0] == 0, "every shoe belongs to a session")

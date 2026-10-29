@@ -32,7 +32,11 @@ realistic table.
 - **Dealer's box**: a `♦`-bordered rectangle frames the dealer's hand —
   top border is the dashed line under the red status bar, sides run down
   the same dividers that separate the three spot columns, bottom border is
-  its own `♦` row sitting just past the dealer's card stack. On the rare
+  its own `♦` row sitting just past the dealer's banner line. Inside it,
+  top to bottom: the dealer's hand value, the cards, then (one line clear
+  of the revealed cards) a full-width **DEALER BLACKJACK** (white on
+  maroon) or **DEALER BUST** (yellow on bright red) banner when either
+  happens. On the rare
   hand big enough to spill past it, the cards simply draw over the border
   glyphs rather than getting clipped or hidden. Each player column's own
   `♦` divider, by contrast, only starts at the settlement-banner row right
@@ -225,7 +229,8 @@ all at once at the end of the round:
 | Power Poker / Star 21 | Immediately after the deal (both only need the first 2 cards + dealer up-card) | side-bet label, e.g. "STRAIGHT FLUSH" | bet-specific accent |
 | Insurance | The instant the dealer's hole card is peeked | "INSURANCE" (row 1), folded into "Side Bets Total" (row 2) | beige / black |
 | Player blackjack (unbeaten) | Immediately, once the dealer is confirmed clean | "BLACKJACK" | yellow on dark purple |
-| Dealer blackjack | Immediately, at the peek | "DEALER BLACKJACK" | white on maroon |
+| Dealer blackjack | Immediately, at the peek | "DEALER BLACKJACK" under the dealer's cards; each losing spot shows an ordinary "Lose – $0.00 returned" | white on maroon (dealer) |
+| Dealer bust | As the busting card lands | "DEALER BUST" under the dealer's cards; each spot still standing shows its ordinary "Win"/"Double Down Win" | yellow on bright red (dealer) |
 | Even money | Immediately, on acceptance | "EVEN MONEY" | white on dark green |
 | Early/late surrender | Late: immediately on the action. Early: recorded up front, credited with the round | "Surrender"/"Surrendered" | white on dark green |
 | Bust (hit or double) | Immediately, the instant it busts | "BUST" | white on deep red |
@@ -343,19 +348,25 @@ adds a sound beyond the ordinary card-deal ones.
   left-aligned, values right-aligned, columns fixed-width so nothing
   staggers row to row.
 - **Lifetime**: EV % (on main wagers only), total lifetime/main-bet/
-  side-bet P/L $, Power Poker P/L $, Star 21 P/L $, sessions played, total
-  hands dealt, wins/losses/pushes/surrenders.
+  side-bet P/L $, Power Poker P/L $, Star 21 P/L $, Dealer Buster P/L $,
+  sessions played, total hands dealt, wins/losses/pushes/surrenders.
 - **Session**: player/dealer wins, pushes, surrenders, doubles, splits,
-  Dealer Pulled 21s (the dealer hitting to a non-blackjack 21), player/
-  dealer blackjacks, shoes played, hands dealt, session/main/side-bet
-  P/L $, aces split (the number of times you split a pair of aces, not
-  the number of aces involved), tens split (same, for ten-value pairs),
-  dealer busts, and your **current streak** — "W2"/"L3"-style, a run of
-  consecutive winning or losing hands. A push or surrender doesn't touch
-  it either way; a win or loss either extends the current streak or
-  starts a fresh one in the other direction.
+  player/dealer blackjacks, Dealer 21s (every round the dealer's hand made
+  21, blackjacks included), shoes played (in quarter shoes, from 0.00 at
+  the start of a session: each shoe counts by how far it's been played
+  toward its cut card, so it reads 0.25 → 0.50 → 0.75 → 1.00 → 1.25 … as
+  you play; a shoe replaced early with `newshoe` counts only the part
+  played), hands dealt, session/main/side-bet P/L $, aces split (the number of times you split a pair of
+  aces, not the number of aces involved), tens split (same, for ten-value
+  pairs), dealer busts, and your **current streak** — "W2"/"L3"/"P1"-style,
+  a run of consecutive hands with the same result (win, loss, or push). A
+  different result starts a fresh streak; a surrender doesn't touch it.
+- On the full-screen `stats` screen, each column of the two tables is
+  sized to fit: names left-aligned, values right-aligned, with a fixed gap
+  between the longest name and the longest value.
 - **Side-bet tables** (full-screen `stats` only): Power Poker, Star 21,
-  and Buster each get their own table, sorted lowest payout to highest,
+  and Buster each get their own table, titled with that bet's lifetime
+  P/L (e.g. `STAR 21 -- P/L: +$925.00`), sorted lowest payout to highest,
   showing every category's current payout, how many times it's been
   *dealt* (occurred at all, wagered on or not), and how many times it's
   actually *won* (occurred **and** you had a wager on it that round). That
@@ -416,7 +427,7 @@ adds a sound beyond the ordinary card-deal ones.
   retired (including when you quit, press Ctrl-C, or close the window) — so
   it can't be peeked at mid-shoe.
 - **New tracked metrics**, kept per session and all-time: peak and lowest
-  bankroll, max drawdown, longest win/loss streaks, biggest hand win and
+  bankroll, max drawdown, longest win/loss/push streaks, biggest hand win and
   loss, and results by hand type (hard / soft / pairs / blackjacks /
   doubled / split), shown in a new block at the bottom of the `stats`
   screen. The Main UI's panels are unchanged.
@@ -529,10 +540,10 @@ any time by launching without `--db`.
   check as any other wager. That's what lets a $25 bet actually collect
   its full 3:2 blackjack payout ($37.50) instead of losing the odd fifty
   cents to a whole-dollar-only bankroll.
-- **In a hand**: `SPACE` Hit, `RETURN` Stand, `D` Double, `P` Split, `S`
+- **In a hand**: `SPACE` Hit, `RETURN` Stand, `D` Double, `P` Split, `X`
   Surrender.
 - **Prelim prompts** (shown with their own key hints on screen): early
-  surrender (`S` surrender, `RETURN` continue), insurance/even money
+  surrender (`X` surrender, `RETURN` continue), insurance/even money
   (`SPACE` yes, `RETURN` no), and — with `double blackjack on` — the
   natural-blackjack double offer (`D` double, `RETURN` decline).
 - **Commands**: click the input line (or press `/`) and type at the bottom
@@ -779,9 +790,10 @@ launches. The row is updated after every round, so it's always current.
 | `starting_bankroll`, `ending_bankroll`, `peak_bankroll`, `lowest_bankroll` | Bankroll as observed at round boundaries |
 | `max_drawdown` | Largest peak-to-trough fall in cumulative session P/L (a `bank add` can't distort it) |
 | `rounds_played`, `hands_played`, `hands_won`, `hands_lost`, `hands_pushed`, `hands_surrendered` | Tallies (a round cut off by quitting isn't counted as played) |
-| `doubles`, `splits`, `aces_split`, `tens_split`, `player_blackjacks`, `dealer_blackjacks`, `dealer_pulled_21s`, `dealer_busts`, `shoes_played` | Same definitions as the in-game Session Stats |
+| `doubles`, `splits`, `aces_split`, `tens_split`, `player_blackjacks`, `dealer_blackjacks`, `dealer_21s`, `dealer_busts` | Same definitions as the in-game Session Stats (`dealer_21s` was `dealer_pulled_21s`, non-blackjack 21s only, before schema v4) |
+| `shoes_played` | `REAL`, in quarter shoes: each of the session's shoes counts by how far it was played toward its cut card (a whole 1.0 once it reached it), totalled and rounded down to the quarter. Before schema v4 it was a whole number of shoes cut, starting at 1 |
 | `main_wagered`, `main_pl`, `sidebet_pl`, `net_pl` | Summed from the session's own `hands` rows (`sidebet_pl` includes insurance) |
-| `longest_win_streak`, `longest_loss_streak` | Consecutive hands; pushes and surrenders don't break a streak |
+| `longest_win_streak`, `longest_loss_streak`, `longest_push_streak` | Consecutive hands with the same result; a different result ends the streak, a surrender neither extends nor ends it (recomputed this way for every session when the database was upgraded to schema v4) |
 
 **`shoes`** — one row per unique shuffle.
 

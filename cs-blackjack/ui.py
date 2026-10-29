@@ -88,7 +88,7 @@ MIN_COL_WIDTH = max(CARD_ROW_WIDTH, SIDEBET_GROUP_W, MAIN_WAGER_BOX_W)
 
 # ---- Stats panel ----
 STATS_SESSION_ROWS = 9  # per sub-column (2 sub-columns) -- full Session Stats table, Main UI and Stats screen alike
-STATS_LIFETIME_ROWS = 6  # per sub-column (2 sub-columns) -- full Lifetime Stats table, Main UI and Stats screen alike
+STATS_LIFETIME_ROWS = 7  # first sub-column (the second gets the rest) -- full Lifetime Stats table, Main UI and Stats screen alike
 STATS_MAX_ROWS = max(STATS_SESSION_ROWS, STATS_LIFETIME_ROWS)  # Main-UI row budget (session vs. lifetime blocks)
 
 # Side-bet paytables shown inline on the Main UI, built live from the
@@ -149,6 +149,12 @@ STATS_BLOCK_ROWS = max(STATS_MAX_ROWS, PAYOUT_MAX_ROWS)  # shared row budget for
 STATS_MIN_COL_W = 25  # per stats sub-column (4 sub-columns: session x2, lifetime x2)
 STATS_INNER_GAP = 1  # buffer between Session's own 2 sub-columns, and between Lifetime's own 2
 STATS_TABLE_GAP = 2  # extra buffer between Session's table and Lifetime's, beyond their own headers
+# The full-screen 'stats' command has room to spare, so its Lifetime/Session
+# tables space out more: name-to-value, sub-column to sub-column, and table
+# to table.
+STATS_SCREEN_VALUE_GAP = 3
+STATS_SCREEN_SUBCOLUMN_GAP = 4
+STATS_SCREEN_TABLE_GAP = 8
 STATS_ROW_MIN_WIDTH = (
     (PAYOUT_COL_W * 3 + PAYOUT_GAP * 2) + 4 + STATS_MIN_COL_W * 4 + STATS_INNER_GAP * 2 + STATS_TABLE_GAP
 )
@@ -160,10 +166,10 @@ MIN_COLS = max(
 # ---- Vertical content budget ----
 # Rows, top to bottom: title(1) + rules-summary/card-count/bankroll
 # banner(1) + table-status/running-true banner(1) + divider(1, also the
-# dealer box's top border) + dealer status(1) + dealer value(1) + dealer
-# cards(CARD_BLOCK_HEIGHT + DEALER_STACK_DY -- the extra row is the hole
-# card's peek, past the up-card's own footprint, while it's still stacked
-# pre-reveal) + dealer box bottom border(1) + buffer(1) + split-hand chips
+# dealer box's top border) + dealer value(1) + dealer cards(CARD_BLOCK_HEIGHT
+# + DEALER_STACK_DY -- the extra row is the hole card's peek, past the
+# up-card's own footprint, while it's still stacked pre-reveal) + dealer
+# BUST/BLACKJACK banner(1) + dealer box bottom border(1) + buffer(1) + split-hand chips
 # row(1) + player cards(CARD_BLOCK_HEIGHT) + active value / prelim-prompt
 # row(1) + main-bet settlement banner row(1) + main wager box(3) +
 # side-bet boxes(3) (each bet's own name doubles as its header, so no
@@ -194,7 +200,7 @@ ACTION_HINTS = [
     ("stand", "RETURN Stand"),
     ("double", "D Double"),
     ("split", "P Split"),
-    ("surrender", "S Surrender"),
+    ("surrender", "X Surrender"),
 ]
 
 # Betting-grid rows: index 0 is the main wager, 1-3 are the side bets, in the
@@ -473,7 +479,7 @@ def hand_value_label(hand: Hand, hide_hole: bool = False, resolved: bool = False
         return f"{visible.best_value} + ??"
 
     if hand.is_bust:
-        # No "BUST" suffix here -- the status line right below already says it.
+        # No "BUST" suffix here -- the hand's own banner already says it.
         return str(hand.best_value)
     if hand.is_blackjack:
         return "21"
@@ -504,14 +510,18 @@ def hand_status_text(hand: Hand, spot: Spot, round_: Round) -> str:
     return ""
 
 
-def dealer_status_text(round_: Optional[Round]) -> str:
+def _dealer_banner(round_: Optional[Round]) -> Tuple[str, int]:
+    """The banner on the line below the dealer's cards, (text, curses attr):
+    only a dealer blackjack or a dealer bust gets one -- ("", 0) otherwise.
+    Each player spot's own banner then just shows that hand's ordinary
+    result (a loss to the blackjack is a plain "Lose")."""
     if round_ is None or not round_.dealer_revealed:
-        return ""
+        return "", 0
     if round_.dealer_has_blackjack:
-        return "BLACKJACK"
+        return "DEALER BLACKJACK", curses.color_pair(DEALER_BJ_PAIR) | curses.A_BOLD
     if round_.dealer_hand.is_bust:
-        return "BUST"
-    return ""
+        return "DEALER BUST", curses.color_pair(DEALER_BUST_PAIR) | curses.A_BOLD
+    return "", 0
 
 
 def money(x: float) -> str:
@@ -591,15 +601,12 @@ def _signed_money(x: float) -> str:
 
 
 def _streak_text(s: Stats) -> str:
-    if s.current_streak > 0:
-        return f"W{s.current_streak}"
-    if s.current_streak < 0:
-        return f"L{-s.current_streak}"
-    return "-"
+    """"W2" / "L3" / "P1", or "-" before the session's first result."""
+    return f"{s.current_streak_kind}{s.current_streak}" if s.current_streak else "-"
 
 
 def lifetime_stats_columns(s: Stats) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
-    """The full Lifetime Stats table (2x6), shown unabridged on both the
+    """The full Lifetime Stats table (7 + 6 rows), shown unabridged on both the
     Main UI and the 'stats' full-screen command -- overall P/L and hand
     tallies only. Per-category side-bet occurrence/win data lives in its
     own dedicated per-bet tables instead -- see sidebet_stats_tables()."""
@@ -611,6 +618,7 @@ def lifetime_stats_columns(s: Stats) -> Tuple[List[Tuple[str, str]], List[Tuple[
         ("Total Side Bet P/L $", _signed_money(s.lifetime_sidebet_pl)),
         ("Power Poker P/L $", _signed_money(s.lifetime_power_poker_pl)),
         ("Star 21 P/L $", _signed_money(s.lifetime_star21_pl)),
+        ("Dealer Buster P/L $", _signed_money(s.lifetime_dealer_buster_pl)),
         ("Sessions Played", str(s.sessions_played)),
         ("Total Hands Dealt", str(s.hands_lifetime)),
         ("Player Wins", str(s.player_wins)),
@@ -631,12 +639,12 @@ def session_stats_columns(s: Stats) -> Tuple[List[Tuple[str, str]], List[Tuple[s
         ("Surrenders", str(s.surrenders)),
         ("Doubles", str(s.doubles)),
         ("Splits", str(s.splits)),
-        ("Dealer Pulled 21s", str(s.greg_specials)),
         ("Player Blackjacks", str(s.player_blackjacks)),
         ("Dealer Blackjacks", str(s.dealer_blackjacks)),
+        ("Dealer 21s", str(s.dealer_21s)),
     ]
     col2 = [
-        ("Shoes Played", str(s.shoes_played)),
+        ("Shoes Played", f"{s.shoes_played:.2f}"),
         ("Hands Dealt", str(s.hands_this_session)),
         ("Session P/L $", _signed_money(s.session_pl())),
         ("Main Bet P/L $", _signed_money(s.session_main_pl)),
@@ -663,6 +671,14 @@ SIDEBET_STATS_TABLES = (
     ("star21", "star21_standard", "STAR 21"),
     ("dealer_buster", "buster_multi", "BUSTER"),
 )
+
+
+def _sidebet_lifetime_pl(s: Stats, bet_key: str) -> float:
+    return {
+        "power_poker": s.lifetime_power_poker_pl,
+        "star21": s.lifetime_star21_pl,
+        "dealer_buster": s.lifetime_dealer_buster_pl,
+    }[bet_key]
 
 
 def sidebet_stats_tables(
@@ -809,12 +825,14 @@ def _spot_settlement_banner(round_: Optional[Round], spot_index: int) -> Tuple[s
     whatever the rest of the round is still doing.
 
     Most outcomes get the standard "Win/Lose/Push/Surrendered -
-    $X returned" treatment (dark grass green). A handful of specific
-    outcomes read as a different *kind* of event and get their own color:
-    an immediate player blackjack (yellow on dark purple), any hand beaten
-    by a confirmed dealer blackjack (white on maroon), a player bust
-    (white on deep red), and an accepted even money offer -- which is
-    still the standard green, per spec, just its own distinct label. A
+    $X returned" treatment (dark grass green) -- including a hand beaten
+    by a dealer blackjack, or won on a dealer bust: those events get their
+    own banner under the dealer's cards (see _dealer_banner), so each spot
+    just reports what its hand did. A couple of specific outcomes read as
+    a different *kind* of event and get their own color: an immediate
+    player blackjack (yellow on dark purple) and a player bust (white on
+    deep red); an accepted even money offer is still the standard green,
+    per spec, just its own distinct label. A
     doubled hand's win/loss also keeps the standard green, just labeled
     "Double Down Win"/"Double Down Loss" instead of the plain Win/Lose.
 
@@ -825,11 +843,8 @@ def _spot_settlement_banner(round_: Optional[Round], spot_index: int) -> Tuple[s
     into the plain Win/Loss counts -- reporting it as an ordinary win/loss
     would misstate how many hands actually won or lost, since twice the
     money was riding on that one hand. A split hand can never itself be a
-    blackjack or have taken even money
-    (see Hand.is_blackjack), so the tally case only ever needs to pick
-    between the standard color and the dealer-blackjack one -- that's the
-    one event that's always true of every hand in the spot at once, so a
-    single color for the whole tally still reads unambiguously."""
+    blackjack or have taken even money (see Hand.is_blackjack), so the
+    tally is always the standard color."""
     if round_ is None:
         return "", 0
     results = [r for r in round_.results if r.spot_index == spot_index]
@@ -837,7 +852,6 @@ def _spot_settlement_banner(round_: Optional[Round], spot_index: int) -> Tuple[s
         return "", 0
     total = sum(r.payout for r in results)
     standard_attr = curses.color_pair(STANDARD_SETTLEMENT_PAIR) | curses.A_BOLD
-    dealer_bj_attr = curses.color_pair(DEALER_BJ_PAIR) | curses.A_BOLD
 
     if len(results) == 1:
         r = results[0]
@@ -848,8 +862,6 @@ def _spot_settlement_banner(round_: Optional[Round], spot_index: int) -> Tuple[s
             text, attr = "BLACKJACK", curses.color_pair(PLAYER_BJ_PAIR) | curses.A_BOLD
         elif hand.is_bust:
             text, attr = "BUST", curses.color_pair(BUST_PAIR) | curses.A_BOLD
-        elif round_.dealer_has_blackjack and r.outcome == "dealer_win":
-            text, attr = "DEALER BLACKJACK", dealer_bj_attr
         elif hand.doubled and r.outcome == "player_win":
             text, attr = "Double Down Win", standard_attr
         elif hand.doubled and r.outcome == "dealer_win":
@@ -877,7 +889,7 @@ def _spot_settlement_banner(round_: Optional[Round], spot_index: int) -> Tuple[s
             singular, plural = _OUTCOME_WORDS[outcome]
             parts.append(f"{n} {singular if n == 1 else plural}")
         text = "/".join(parts)
-        attr = dealer_bj_attr if round_.dealer_has_blackjack else standard_attr
+        attr = standard_attr
 
     return f"{text} – ${total:,.2f} returned", attr
 
@@ -1201,22 +1213,23 @@ def render(
     _safe_addstr(win, y, left_margin, "-" * max(usable_width, 0))
     y += 1  # divider row -- also doubles as the dealer box's own top border (see below)
 
-    # ---- DEALER: status line (blank unless BUST/BLACKJACK), value line,
-    # then cards directly beneath with no gap (no "DEALER" label) ----
+    # ---- DEALER: value line, then cards directly beneath with no gap (no
+    # "DEALER" label), then the BUST/BLACKJACK banner on the line after the
+    # card block (see dealer_banner_y) ----
     hide_hole = round_ is not None and not round_.dealer_revealed
     dealer_hand = round_.dealer_hand if round_ else Hand()
     dealer_resolved = round_ is not None and round_.dealer_revealed and round_.phase != Phase.DEALER_TURN
-    if round_ and not animating:
-        d_status = dealer_status_text(round_)
-        _safe_addstr(win, y, _center_x(d_status, usable_width, left_margin), d_status, curses.A_BOLD)
-    y += 1
     if round_ and not animating:
         value_text = _emph(hand_value_label(dealer_hand, hide_hole=hide_hole, resolved=dealer_resolved))
         _safe_addstr(win, y, _center_x(value_text, usable_width, left_margin), value_text, curses.A_BOLD)
     y += 1
 
     dealer_cards_base_y = y
-    dealer_box_bottom_y = dealer_cards_base_y + CARD_BLOCK_HEIGHT + DEALER_STACK_DY
+    # The card block's last row is the hole card's peek, blank once it's
+    # revealed -- so the banner sits one line clear of the revealed cards,
+    # just as a player's banner sits below its value line.
+    dealer_banner_y = dealer_cards_base_y + CARD_BLOCK_HEIGHT + DEALER_STACK_DY
+    dealer_box_bottom_y = dealer_banner_y + 1
 
     # ---- Dealer's ♦ box: a rectangle bordering the dashed line above
     # (dash_row_y -- drawn as part of the header, unchanged) on top, the
@@ -1248,6 +1261,11 @@ def render(
             draw_dealer_cards(win, dealer_cards_base_y, dealer_x, dealer_hand, hide_hole=True, max_cards=dealer_reveal)
         else:
             draw_dealer_cards(win, dealer_cards_base_y, dealer_x, dealer_hand, hide_hole=hide_hole, max_cards=None)
+            # Spans the box's inside, between its ♦ sides -- exactly the
+            # middle spot column, the same width as a player's banner.
+            dealer_banner_text, dealer_banner_attr = _dealer_banner(round_)
+            if dealer_banner_text:
+                _draw_filled_banner(win, dealer_banner_y, col_x[1], col_width, dealer_banner_text, dealer_banner_attr)
     y = dealer_box_bottom_y + 1
 
     # ---- PLAYER: a buffer row below the dealer box's bottom border, then
@@ -1363,7 +1381,7 @@ def render(
     elif round_ is None:
         hint = "[RETURN] to Deal"
     elif round_.phase == Phase.EARLY_SURRENDER:
-        hint = "S Surrender    RETURN Continue"
+        hint = "X Surrender    RETURN Continue"
     elif round_.phase == Phase.INSURANCE:
         hint = "SPACE Yes    RETURN No"
     elif round_.phase == Phase.DOUBLE_BLACKJACK:
@@ -1444,10 +1462,13 @@ def render(
     # The row is hard-clipped to the column's width so a long value can
     # never bleed into the next column even in a narrower terminal.
     row_w = max(0, stats_col_w - 1)
-    value_w = 10  # keeps money/percent values intact; the label truncates first if space is tight
     label_value_gap = 2  # breathing room so the longest labels (e.g. "Dealer Blackjacks") never butt up against the value
-    label_w = max(4, row_w - value_w - label_value_gap)
     for col_x_, rows in ((sess_a_x, sess_a), (sess_b_x, sess_b), (life_a_x, life_a), (life_b_x, life_b)):
+        # Wide enough for the column's longest value, so money is never cut
+        # short ("+$10,520.00", not "+$10,520.0"); the label truncates first
+        # if space is tight.
+        value_w = max(10, max(len(value) for _label, value in rows))
+        label_w = max(4, row_w - value_w - label_value_gap)
         for i, (label, value) in enumerate(rows):
             line = f"{label[:label_w]:<{label_w}}{'':<{label_value_gap}}{value:>{value_w}}"
             _safe_addstr(win, stats_y + 1 + i, col_x_, line[:row_w])
@@ -1605,34 +1626,38 @@ def render_gamerules_screen(stdscr, session: GameSession) -> None:
 
 def render_stats_screen(stdscr, session: GameSession, round_: Optional[Round]) -> None:
     """Lifetime Stats and Session Stats side by side on top (each its own
-    2-sub-column table, single-column gap within a table, a wider gap
-    between the two tables); Power Poker/Star 21/Buster side by side
-    beneath that, each its own 4-column (category/payout/dealt/won) table.
-    Every column is fixed-width, name left-aligned and value right-aligned,
-    the same convention throughout -- nothing staggers row to row."""
+    2-sub-column table, a wider gap between the two tables than within
+    one); Power Poker/Star 21/Buster side by side beneath that, each its own
+    4-column (category/payout/dealt/won) table titled with that bet's
+    lifetime P/L. Every column has names left-aligned and values
+    right-aligned, the same convention throughout -- nothing staggers row
+    to row. The top tables' columns are sized to what's in them: each one
+    as wide as its longest name, a fixed gap, and its longest value, so a
+    long money figure never pushes its row out of line."""
     display_stats = _display_stats(session, round_)
-    label_w, value_w = 22, 9
-    inner_gap = " " * STATS_INNER_GAP
     table_gap = " " * STATS_TABLE_GAP
-    table_w = label_w + value_w  # one table's own single sub-column width
-
-    def cell(row_: Tuple[str, str]) -> str:
-        label, value = row_
-        return f"{label:<{label_w}}{value:>{value_w}}"
 
     lines: List[str] = []
 
     # ---- Lifetime Stats | Session Stats, side by side ----
-    block_w = 2 * table_w + STATS_INNER_GAP  # a table's own 2 sub-columns, together
-    lines.append(f"{'LIFETIME STATS':<{block_w}}{table_gap}{'SESSION STATS'}")
+    def stat_column(rows: List[Tuple[str, str]]) -> List[str]:
+        label_w = max(len(label) for label, _value in rows)
+        value_w = max(len(value) for _label, value in rows)
+        return [f"{label:<{label_w}}{' ' * STATS_SCREEN_VALUE_GAP}{value:>{value_w}}" for label, value in rows]
+
     life_a, life_b = lifetime_stats_columns(display_stats)
     sess_a, sess_b = session_stats_columns(display_stats)
-    for i in range(max(len(life_a), len(sess_a))):
-        la = life_a[i] if i < len(life_a) else ("", "")
-        lb = life_b[i] if i < len(life_b) else ("", "")
-        sa = sess_a[i] if i < len(sess_a) else ("", "")
-        sb = sess_b[i] if i < len(sess_b) else ("", "")
-        lines.append("  " + cell(la) + inner_gap + cell(lb) + table_gap + cell(sa) + inner_gap + cell(sb))
+    columns = [stat_column(rows) for rows in (life_a, life_b, sess_a, sess_b)]
+    widths = [len(col[0]) for col in columns]
+    sub_gap = " " * STATS_SCREEN_SUBCOLUMN_GAP
+    stats_table_gap = " " * STATS_SCREEN_TABLE_GAP
+    # The SESSION STATS header sits 2 columns left of its rows, the same
+    # outdent LIFETIME STATS has over the row indent ("  ") below.
+    session_header_x = widths[0] + len(sub_gap) + widths[1] + len(stats_table_gap)
+    lines.append(f"{'LIFETIME STATS':<{session_header_x}}SESSION STATS")
+    for i in range(max(len(col) for col in columns)):
+        a, b, c, d = (col[i] if i < len(col) else " " * w for col, w in zip(columns, widths))
+        lines.append(("  " + a + sub_gap + b + stats_table_gap + c + sub_gap + d).rstrip())
 
     lines.append("")
     lines.append("")
@@ -1647,7 +1672,11 @@ def render_stats_screen(stdscr, session: GameSession, round_: Optional[Round]) -
         return f"{name:<{name_w}}{payout:>{payout_w}}{dealt:>{dealt_w}}{won:>{won_w}}"
 
     sidebet_tables = sidebet_stats_tables(session.rules.payouts, display_stats)
-    lines.append(table_gap.join(f"{title:<{sb_table_w}}" for title, _rows in sidebet_tables).rstrip())
+    titles = [
+        f"{title} -- P/L: {_signed_money(_sidebet_lifetime_pl(display_stats, bet_key))}"
+        for (bet_key, _table_key, _title), (title, _rows) in zip(SIDEBET_STATS_TABLES, sidebet_tables)
+    ]
+    lines.append(table_gap.join(f"{title:<{sb_table_w}}" for title in titles).rstrip())
     lines.append(
         "  "
         + table_gap.join(f"{'Category':<{name_w}}{'Payout':>{payout_w}}{'Dealt':>{dealt_w}}{'Won':>{won_w}}" for _ in sidebet_tables)
@@ -1697,6 +1726,7 @@ def _history_stats_lines(session: GameSession) -> List[str]:
         ("Max Drawdown", money(sess["max_drawdown"]) if sess else "-", money(alltime["max_drawdown"])),
         ("Longest Win Streak", streak("W", sess["longest_win_streak"]) if sess else "-", streak("W", alltime["longest_win_streak"])),
         ("Longest Loss Streak", streak("L", sess["longest_loss_streak"]) if sess else "-", streak("L", alltime["longest_loss_streak"])),
+        ("Longest Push Streak", streak("P", sess["longest_push_streak"]) if sess else "-", streak("P", alltime["longest_push_streak"])),
         ("Biggest Hand Win", money(sess["biggest_win"]) if sess else "-", money(alltime["biggest_win"])),
         ("Biggest Hand Loss", money(sess["biggest_loss"]) if sess else "-", money(alltime["biggest_loss"])),
     ]
@@ -1773,10 +1803,11 @@ SIDEBET_TOTAL_PAIR = 18  # "Side Bets Total" summary frame: dark gray
 # entirely distinct from STANDARD and from each other.
 STANDARD_SETTLEMENT_PAIR = 20  # standard win/lose/push/surrender/even-money: dark grass green
 PLAYER_BJ_PAIR = 21  # an immediate, unbeaten player blackjack: yellow on dark purple
-DEALER_BJ_PAIR = 22  # any hand beaten by a confirmed dealer blackjack: white on maroon
+DEALER_BJ_PAIR = 22  # the dealer's DEALER BLACKJACK banner: white on maroon
 BUST_PAIR = 23  # a player bust: white on deep red
 INSURANCE_PAIR = 24  # a settled Insurance side bet, win or lose: black on beige
 NET_RETURN_LABEL_PAIR = 25  # "Net Return:" label on the red bar -- yellow, matching Bankroll's own label treatment
+DEALER_BUST_PAIR = 26  # the dealer's DEALER BUST banner: yellow on bright red
 
 
 def init_colors() -> None:
@@ -1856,7 +1887,7 @@ def init_colors() -> None:
     deep_red = 88 if curses.COLORS >= 256 else curses.COLOR_RED
     curses.init_pair(BUST_PAIR, curses.COLOR_WHITE, deep_red)
 
-    # A hand beaten by a confirmed dealer blackjack: maroon, darker still
+    # The dealer's DEALER BLACKJACK banner: maroon, darker still
     # than both the top status bar's red (pair 5) and the bust deep-red
     # above, with white text -- red-on-purple read poorly, white is a
     # clean, unambiguous swap. Falls back to plain red on a basic
@@ -1873,6 +1904,14 @@ def init_colors() -> None:
     curses.init_pair(INSURANCE_PAIR, curses.COLOR_BLACK, beige)
 
     curses.init_pair(NET_RETURN_LABEL_PAIR, curses.COLOR_YELLOW, curses.COLOR_RED)
+
+    # The dealer's DEALER BUST banner: a bright red, brighter than every
+    # other red on screen (the status bar, a player bust, the dealer
+    # blackjack's maroon), with bright yellow text. Falls back to plain
+    # yellow on red on a basic 8-color terminal.
+    bright_red = 196 if curses.COLORS >= 256 else curses.COLOR_RED
+    bright_yellow = 226 if curses.COLORS >= 256 else curses.COLOR_YELLOW
+    curses.init_pair(DEALER_BUST_PAIR, bright_yellow, bright_red)
 
 
 DEAL_FRAME_MS = 250  # pause between each card of the initial deal animation
@@ -2238,7 +2277,7 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
                 if ch in RETURN_KEYS:
                     message = ""
                     round_.respond_early_surrender(False)
-                elif ch in (ord("s"), ord("S")):
+                elif ch in (ord("x"), ord("X")):
                     message = ""
                     round_.respond_early_surrender(True)
                 else:
@@ -2305,7 +2344,7 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
                     action = "double"
                 elif ch in (ord("p"), ord("P")):
                     action = "split"
-                elif ch in (ord("s"), ord("S")):
+                elif ch in (ord("x"), ord("X")):
                     action = "surrender"
                 if action is not None:
                     message = ""

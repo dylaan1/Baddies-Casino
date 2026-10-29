@@ -76,7 +76,8 @@ check(not r2.reshuffled_mid_round and all(x["reshuffled_mid_round"] == 0 and x["
       "the next round is unflagged and belongs to the new shoe")
 check(all(x["cards_dealt_before"] >= len(r.drawn) for x in rows2), "...counted from the new shoe's own depth (table cards already dealt)")
 check(c.execute("select count(*) from hands where reshuffled_mid_round=1").fetchone()[0] == len(rows), "exactly that round is flagged so far")
-check(c.execute("select shoes_played from sessions where session_id=?", (hist.session_id,)).fetchone()[0] >= 2, "the session's shoes_played counts the mid-round shoe too")
+check(c.execute("select shoes_played from sessions where session_id=?", (hist.session_id,)).fetchone()[0] >= 1,
+      "the session's shoes_played counts the exhausted shoe as a whole shoe")
 
 # closing writes the tail of the shoe in play; every shoe row is a complete, exact deck
 hist.close(s)
@@ -117,7 +118,7 @@ conn.execute("""INSERT INTO hands (round_id, session_id, played_at, spot_number,
 conn.commit()
 conn.close()
 h = history.HistoryDB.open(v2)
-check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == history.SCHEMA_VERSION == 3, "a v2 database upgrades to v3 on open")
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == history.SCHEMA_VERSION == 4, "a v2 database upgrades to v4 on open")
 check("reshuffled_mid_round" in [r[1] for r in h.conn.execute("pragma table_info(hands)")], "the hands table gained reshuffled_mid_round")
 check(h.conn.execute("select reshuffled_mid_round from hands").fetchone()[0] == 0, "existing rows read 0 (no reshuffle) -- the truth for everything logged before this feature")
 h.conn.close()
@@ -133,13 +134,80 @@ conn.execute("""INSERT INTO shoes (session_id, cut_at, cut_reason, num_decks, pe
 conn.commit()
 conn.close()
 h = history.HistoryDB.open(v1)
-check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 3, "a v1 database upgrades all the way to v3")
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 4, "a v1 database upgrades all the way to v4")
 mig = h.conn.execute("select card_order from shoes").fetchone()[0]
 check(mig == full[:20] + "|" + full[20:], "its card_order gets the '|' put in at cards_dealt (10 cards dealt)")
 check(h.conn.execute("select count(*) from imported_stats").fetchone()[0] == 0, "imported_stats exists (empty)")
 h.conn.close()
 h = history.HistoryDB.open(v1)
 check(h.conn.execute("select card_order from shoes").fetchone()[0] == mig, "reopening doesn't touch it again (idempotent)")
+h.conn.close()
+
+# v3 -> v4: pushes become a streak of their own (so a push ends a win/loss streak), and Dealer 21s counts every
+# round the dealer made 21, blackjacks included -- recomputed for sessions already logged
+v3 = Path(HOME) / "v3.db"
+conn = sqlite3.connect(v3)
+conn.executescript(history._SCHEMA_V1 + history._SCHEMA_V2 + history._SCHEMA_V3 + "\nPRAGMA user_version = 3;")
+for sid in (1, 2):
+    conn.execute("INSERT INTO sessions (started_at, starting_bankroll, ending_bankroll, peak_bankroll, lowest_bankroll, "
+                 "dealer_pulled_21s, longest_win_streak, longest_loss_streak) VALUES ('2026-09-01T00:00:00Z',1,1,1,1,0,0,0)")
+# (session, round, outcome, dealer_total, dealer_blackjack) in play order -- round 3 is a split (two hands, one round)
+plays = [(1, 1, "win", 20, 0), (1, 2, "win", 21, 1), (1, 3, "push", 21, 0), (1, 3, "win", 21, 0), (1, 4, "loss", 19, 0),
+         (1, 5, "loss", 21, 0), (1, 6, "push", 18, 0), (1, 7, "push", 22, 0), (1, 8, "push", 17, 0), (1, 9, "surrender", 20, 0),
+         (1, 10, "push", 20, 0), (1, 11, "abandoned", 21, 0), (1, 12, "win", 22, 0),
+         (2, 13, "loss", 21, 1), (2, 14, "push", 20, 0), (2, 15, "loss", 19, 0)]
+for sid, rid, outcome, dtotal, dbj in plays:
+    conn.execute("""INSERT INTO hands (round_id, session_id, played_at, spot_number, hand_number, initial_bet, final_bet, hand_type,
+         initial_total, player_cards, player_total, player_soft, player_bust, player_blackjack, is_split, is_split_aces, doubled,
+         surrendered, even_money, dealer_up, dealer_cards, dealer_total, dealer_bust, dealer_blackjack, outcome, payout, main_pl,
+         total_pl, running_count_before, true_count_before, cards_dealt_before, bankroll_before, bankroll_after)
+         VALUES (?,?,'2026-09-01T00:00:00Z',1,1,10,10,'hard',12,'5♠7♥',12,0,0,0,0,0,0,0,0,'T♦','T♦6♣',?,?,?,?,0,0,0,0,0,0,100,100)""",
+                 (rid, sid, dtotal, int(dtotal > 21), dbj, outcome))
+# shoes: session 1 played one shoe to its cut card (240 of 312 at 75% -> 1.0) and half of the next (117 of 234 -> 0.5);
+# session 2 played 30 cards of a 2-deck shoe cut at 80% (30 / 83.2 = 0.36 -> rounds down to 0.25)
+for sid, total, pen, dealt in ((1, 312, 0.75, 240), (1, 312, 0.75, 117), (2, 104, 0.8, 30)):
+    conn.execute("""INSERT INTO shoes (session_id, cut_at, cut_reason, num_decks, penetration, total_cards, cards_dealt, blackjack_payout,
+                    hit_soft_17, rules_json, card_order) VALUES (?, '2026-09-01T00:00:00Z', 'start', ?, ?, ?, ?, 1.5, 0, '{}', '')""",
+                 (sid, total // 52, pen, total, dealt))
+conn.execute("UPDATE sessions SET hands_played = 40 + session_id, peak_bankroll = 900 + session_id, ended_at = '2026-09-02T00:00:00Z'")
+conn.commit()
+conn.row_factory = sqlite3.Row
+before = [dict(r) for r in conn.execute("select * from sessions order by session_id")]
+conn.close()
+h = history.HistoryDB.open(v3)
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 4, "a v3 database upgrades to v4")
+cols = [r[1] for r in h.conn.execute("pragma table_info(sessions)")]
+check("dealer_21s" in cols and "dealer_pulled_21s" not in cols and "longest_push_streak" in cols,
+      "sessions: dealer_pulled_21s renamed to dealer_21s, longest_push_streak added")
+types = {r[1]: r[2] for r in h.conn.execute("pragma table_info(sessions)")}
+check(types["shoes_played"] == "REAL", f"shoes_played is now a REAL column (it holds quarter shoes): {types['shoes_played']}")
+after = [dict(r) for r in h.conn.execute("select * from sessions order by session_id")]
+changed = {"dealer_pulled_21s", "dealer_21s", "shoes_played", "longest_win_streak", "longest_loss_streak", "longest_push_streak"}
+check(len(after) == len(before) and all(a[k] == b[k] for a, b in zip(after, before) for k in b if k not in changed),
+      "every other column of every session came through the rebuild unchanged")
+check([r["shoes_played"] for r in after] == [1.5, 0.25], f"shoes_played recomputed in quarter shoes: {[r['shoes_played'] for r in after]}")
+check(h.conn.execute("pragma foreign_key_check").fetchall() == [] and h.conn.execute("pragma foreign_keys").fetchone()[0] == 1,
+      "the rebuild left every hand and shoe pointing at its session, and foreign-key enforcement is back on")
+check([r["shoes_played"] for r in after] == [h._shoes_played(1), h._shoes_played(2)], "...the same as the game itself computes")
+h.conn.execute("INSERT INTO sessions (started_at, starting_bankroll, ending_bankroll, peak_bankroll, lowest_bankroll) VALUES ('x',1,1,1,1)")
+check(h.conn.execute("select max(session_id) from sessions").fetchone()[0] == 3
+      and h.conn.execute("select count(*) from sqlite_sequence where name = 'sessions_v4'").fetchone()[0] == 0,
+      "session ids carry on from where they were (3 next), with no trace of the rebuild's temporary table")
+h.conn.rollback()
+# session 1: W W | P | W | L L | P P P (surrender skipped) P | W  -> longest W2 L2 P4 (it was W3 when pushes didn't count);
+# dealer 21s in rounds 2 (blackjack), 3 (split -- counted once), 5; round 11 was abandoned
+want = {1: (3, 2, 2, 4), 2: (1, 0, 1, 1)}
+for sid, (d21, w, l, p) in want.items():
+    row = h.conn.execute("select dealer_21s, longest_win_streak, longest_loss_streak, longest_push_streak from sessions where session_id=?",
+                         (sid,)).fetchone()
+    check(tuple(row) == (d21, w, l, p), f"session {sid}: dealer 21s / longest W L P streaks recomputed: {tuple(row)} vs {(d21, w, l, p)}")
+    m = h._session_metrics(sid)
+    check((m["dealer_21s"], m["longest_win_streak"], m["longest_loss_streak"], m["longest_push_streak"]) == tuple(row),
+          f"session {sid}: the migration agrees with what the game itself computes")
+m = h._session_metrics(1)
+check((m["current_streak_kind"], m["current_streak"]) == ("W", 1), f"session 1 ends on W1: {(m['current_streak_kind'], m['current_streak'])}")
+m = h._session_metrics(2)
+check((m["current_streak_kind"], m["current_streak"]) == ("L", 1), "session 2 ends on L1 (the push before it ended the first L)")
 h.conn.close()
 
 check.finish("check_history_reshuffle")

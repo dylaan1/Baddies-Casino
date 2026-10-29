@@ -47,6 +47,7 @@ from __future__ import annotations
 import csv
 import functools
 import json
+import math
 import os
 import shutil
 import sqlite3
@@ -83,8 +84,10 @@ _LIFETIME_COUNTS = (
 )
 _LIFETIME_MONEY = (
     "lifetime_main_wagered", "lifetime_main_pl", "lifetime_sidebet_pl", "lifetime_power_poker_pl", "lifetime_star21_pl",
+    "lifetime_dealer_buster_pl",
 )
 _OUTCOMES = {"player_win": "win", "dealer_win": "loss", "push": "push", "surrender": "surrender"}
+_STREAK_KINDS = {"win": "W", "loss": "L", "push": "P"}  # hands.outcome -> Stats.current_streak_kind
 
 
 class HistoryError(Exception):
@@ -255,7 +258,99 @@ _SCHEMA_V3 = """
 ALTER TABLE hands ADD COLUMN reshuffled_mid_round INTEGER NOT NULL DEFAULT 0;
 """
 
-_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3]
+# v4: three session figures change meaning, and are recomputed here -- from
+# the session's own hand and shoe rows -- for every session already logged:
+# - the current streak counts pushes as a streak of their own ("P2"), so a
+#   push now ends a win or loss streak, and each session keeps its longest
+#   push streak too;
+# - "Dealer Pulled 21s" became dealer_21s -- every round the dealer's hand
+#   made 21, blackjacks included;
+# - shoes_played counts in quarter shoes, each shoe by how far it was played
+#   toward its cut card (see HistoryDB._session_metrics), so it's fractional:
+#   the sessions table is rebuilt (SQLite can't change a column's type in
+#   place) with shoes_played as REAL, dealer_21s and longest_push_streak.
+_SCHEMA_V4 = """
+CREATE TABLE sessions_v4 (
+    session_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at          TEXT    NOT NULL,
+    ended_at            TEXT,                -- NULL while the session is still running
+    end_reason          TEXT,                -- quit | newsession | restore | abandoned (crashed or killed); older versions also wrote hardreset
+    starting_bankroll   REAL    NOT NULL,
+    ending_bankroll     REAL    NOT NULL,
+    peak_bankroll       REAL    NOT NULL,
+    lowest_bankroll     REAL    NOT NULL,
+    max_drawdown        REAL    NOT NULL DEFAULT 0,   -- largest peak-to-trough fall in cumulative session P/L
+    rounds_played       INTEGER NOT NULL DEFAULT 0,   -- rounds played to completion (not one cut off by quitting)
+    hands_played        INTEGER NOT NULL DEFAULT 0,
+    hands_won           INTEGER NOT NULL DEFAULT 0,
+    hands_lost          INTEGER NOT NULL DEFAULT 0,
+    hands_pushed        INTEGER NOT NULL DEFAULT 0,
+    hands_surrendered   INTEGER NOT NULL DEFAULT 0,
+    doubles             INTEGER NOT NULL DEFAULT 0,
+    splits              INTEGER NOT NULL DEFAULT 0,
+    aces_split          INTEGER NOT NULL DEFAULT 0,
+    tens_split          INTEGER NOT NULL DEFAULT 0,
+    player_blackjacks   INTEGER NOT NULL DEFAULT 0,
+    dealer_blackjacks   INTEGER NOT NULL DEFAULT 0,
+    dealer_21s          INTEGER NOT NULL DEFAULT 0,   -- rounds the dealer's hand made 21, blackjacks included
+    dealer_busts        INTEGER NOT NULL DEFAULT 0,
+    shoes_played        REAL    NOT NULL DEFAULT 0,   -- in quarter shoes: each shoe counts by how far it was played toward its cut card
+    main_wagered        REAL    NOT NULL DEFAULT 0,   -- money totals are sums over this session's hand rows
+    main_pl             REAL    NOT NULL DEFAULT 0,
+    sidebet_pl          REAL    NOT NULL DEFAULT 0,   -- side bets plus insurance
+    net_pl              REAL    NOT NULL DEFAULT 0,
+    longest_win_streak  INTEGER NOT NULL DEFAULT 0,   -- longest runs of the same result (a surrender neither extends nor ends one)
+    longest_loss_streak INTEGER NOT NULL DEFAULT 0,
+    longest_push_streak INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT INTO sessions_v4 (
+    session_id, started_at, ended_at, end_reason, starting_bankroll, ending_bankroll, peak_bankroll, lowest_bankroll,
+    max_drawdown, rounds_played, hands_played, hands_won, hands_lost, hands_pushed, hands_surrendered, doubles, splits,
+    aces_split, tens_split, player_blackjacks, dealer_blackjacks, dealer_busts, main_wagered, main_pl, sidebet_pl, net_pl
+)
+SELECT
+    session_id, started_at, ended_at, end_reason, starting_bankroll, ending_bankroll, peak_bankroll, lowest_bankroll,
+    max_drawdown, rounds_played, hands_played, hands_won, hands_lost, hands_pushed, hands_surrendered, doubles, splits,
+    aces_split, tens_split, player_blackjacks, dealer_blackjacks, dealer_busts, main_wagered, main_pl, sidebet_pl, net_pl
+FROM sessions;
+
+DROP TABLE sessions;
+ALTER TABLE sessions_v4 RENAME TO sessions;
+
+UPDATE sessions SET dealer_21s = (
+    SELECT COUNT(DISTINCT round_id) FROM hands
+    WHERE hands.session_id = sessions.session_id AND outcome <> 'abandoned' AND dealer_total = 21
+);
+
+UPDATE sessions SET shoes_played = (
+    SELECT CAST(COALESCE(SUM(MIN(1.0, cards_dealt * 1.0 / MAX(penetration * total_cards, 1))), 0) * 4 + 1e-9 AS INTEGER) / 4.0
+    FROM shoes WHERE shoes.session_id = sessions.session_id
+);
+
+-- Each run of consecutive identical results within a session, in play order
+-- (a surrender or an abandoned hand neither extends nor ends a run).
+CREATE TEMP TABLE streak_runs AS
+WITH ordered AS (
+    SELECT session_id, outcome,
+           ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY hand_id)
+           - ROW_NUMBER() OVER (PARTITION BY session_id, outcome ORDER BY hand_id) AS run
+    FROM hands WHERE outcome IN ('win', 'loss', 'push')
+)
+SELECT session_id, outcome, COUNT(*) AS length FROM ordered GROUP BY session_id, outcome, run;
+
+UPDATE sessions SET
+    longest_win_streak = COALESCE((SELECT MAX(length) FROM streak_runs r
+                                   WHERE r.session_id = sessions.session_id AND r.outcome = 'win'), 0),
+    longest_loss_streak = COALESCE((SELECT MAX(length) FROM streak_runs r
+                                    WHERE r.session_id = sessions.session_id AND r.outcome = 'loss'), 0),
+    longest_push_streak = COALESCE((SELECT MAX(length) FROM streak_runs r
+                                    WHERE r.session_id = sessions.session_id AND r.outcome = 'push'), 0);
+
+DROP TABLE streak_runs;
+"""
+
+_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4]
 SCHEMA_VERSION = len(_MIGRATIONS)
 
 
@@ -265,10 +360,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
         raise HistoryError(
             f"History database is schema v{version}; this game only understands up to v{SCHEMA_VERSION}."
         )
-    for target in range(version, SCHEMA_VERSION):
-        # One transaction per step, version bump included, so a crash mid-
-        # migration leaves the database exactly at the previous version.
-        conn.executescript(f"BEGIN;\n{_MIGRATIONS[target]}\nPRAGMA user_version = {target + 1};\nCOMMIT;")
+    if version == SCHEMA_VERSION:
+        return
+    # A step may rebuild a table other tables refer to (v4 rebuilds sessions,
+    # keeping every session_id). SQLite only allows dropping the old copy with
+    # foreign-key enforcement off -- which can't be changed inside a
+    # transaction, so it's switched off around the steps and restored after.
+    enforced = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for target in range(version, SCHEMA_VERSION):
+            # One transaction per step, version bump included, so a crash mid-
+            # migration leaves the database exactly at the previous version.
+            conn.executescript(f"BEGIN;\n{_MIGRATIONS[target]}\nPRAGMA user_version = {target + 1};\nCOMMIT;")
+    finally:
+        conn.execute(f"PRAGMA foreign_keys = {'ON' if enforced else 'OFF'}")
 
 
 # --------------------------------------------------------------------------
@@ -620,7 +726,7 @@ class HistoryDB:
             "tens_split": m["tens_split"],
             "player_blackjacks": m["player_blackjacks"],
             "dealer_blackjacks": m["dealer_blackjacks"],
-            "dealer_pulled_21s": m["greg_specials"],
+            "dealer_21s": m["dealer_21s"],
             "dealer_busts": m["dealer_busts"],
             "shoes_played": m["shoes_played"],
             "main_wagered": m["main_wagered"],
@@ -629,6 +735,7 @@ class HistoryDB:
             "net_pl": m["session_main_pl"] + m["session_sidebet_pl"],
             "longest_win_streak": m["longest_win_streak"],
             "longest_loss_streak": m["longest_loss_streak"],
+            "longest_push_streak": m["longest_push_streak"],
         }
 
     @_guarded(default=False)
@@ -791,23 +898,24 @@ class HistoryDB:
 
         dealer_bj, dealer_21, dealer_bust = c.execute(
             """SELECT COUNT(DISTINCT CASE WHEN dealer_blackjack = 1 THEN round_id END),
-                      COUNT(DISTINCT CASE WHEN dealer_total = 21 AND dealer_blackjack = 0 AND dealer_bust = 0
-                                          THEN round_id END),
+                      COUNT(DISTINCT CASE WHEN dealer_total = 21 THEN round_id END),
                       COUNT(DISTINCT CASE WHEN dealer_bust = 1 THEN round_id END)
                FROM hands WHERE session_id = ? AND outcome <> 'abandoned'""",
             (sid,),
         ).fetchone()
 
-        streak = longest_win = longest_loss = 0
+        # Runs of the same result, hand by hand; a surrender neither extends
+        # nor ends one.
+        kind, streak = "", 0
+        longest = {"W": 0, "L": 0, "P": 0}
         for (outcome,) in c.execute(
-            "SELECT outcome FROM hands WHERE session_id = ? AND outcome IN ('win', 'loss') ORDER BY hand_id", (sid,)
+            "SELECT outcome FROM hands WHERE session_id = ? AND outcome IN ('win', 'loss', 'push') ORDER BY hand_id",
+            (sid,),
         ):
-            if outcome == "win":
-                streak = streak + 1 if streak >= 0 else 1
-                longest_win = max(longest_win, streak)
-            else:
-                streak = streak - 1 if streak <= 0 else -1
-                longest_loss = max(longest_loss, -streak)
+            this = _STREAK_KINDS[outcome]
+            streak = streak + 1 if this == kind else 1
+            kind = this
+            longest[kind] = max(longest[kind], streak)
 
         return {
             "hands_this_session": hands,
@@ -821,16 +929,32 @@ class HistoryDB:
             "tens_split": splits("is_split = 1 AND is_split_aces = 0 AND substr(player_cards, 1, 1) IN ('T', 'J', 'Q', 'K')"),
             "player_blackjacks": blackjacks,
             "dealer_blackjacks": dealer_bj,
-            "greg_specials": dealer_21,
+            "dealer_21s": dealer_21,
             "dealer_busts": dealer_bust,
+            "current_streak_kind": kind,
             "current_streak": streak,
-            "longest_win_streak": longest_win,
-            "longest_loss_streak": longest_loss,
-            "shoes_played": c.execute("SELECT COUNT(*) FROM shoes WHERE session_id = ?", (sid,)).fetchone()[0],
+            "longest_win_streak": longest["W"],
+            "longest_loss_streak": longest["L"],
+            "longest_push_streak": longest["P"],
+            "shoes_played": self._shoes_played(sid),
             "main_wagered": wagered,
             "session_main_pl": main_pl,
             "session_sidebet_pl": side_pl,
         }
+
+    def _shoes_played(self, sid: int) -> float:
+        """How many shoes the session has played through, in quarter shoes:
+        each of its shoes counts by how far it got toward its cut card (so
+        one that reached it is a whole 1.0, and one replaced early -- by
+        'newshoe', or by quitting -- only the part actually played), and the
+        total is rounded down to the quarter. A new session starts at 0."""
+        played = sum(
+            min(1.0, dealt / max(penetration * total, 1))
+            for dealt, penetration, total in self.conn.execute(
+                "SELECT cards_dealt, penetration, total_cards FROM shoes WHERE session_id = ?", (sid,)
+            )
+        )
+        return math.floor(played * 4 + 1e-9) / 4  # (the 1e-9 keeps an exact quarter from flooring to the one below)
 
     def _lifetime_metrics(self) -> Dict[str, Any]:
         """Lifetime totals from the tables alone (no imported baseline),
@@ -849,12 +973,13 @@ class HistoryDB:
         """The lifetime aggregates over the hands rows matching `where` (all of
         them when empty)."""
         c = self.conn
-        hands, won, lost, pushed, surrendered, wagered, main_pl, side_pl, pp_pl, s21_pl = c.execute(
+        hands, won, lost, pushed, surrendered, wagered, main_pl, side_pl, pp_pl, s21_pl, buster_pl = c.execute(
             f"""SELECT COALESCE(SUM(outcome <> 'abandoned'), 0), COALESCE(SUM(outcome = 'win'), 0),
                        COALESCE(SUM(outcome = 'loss'), 0), COALESCE(SUM(outcome = 'push'), 0),
                        COALESCE(SUM(outcome = 'surrender'), 0), COALESCE(SUM(final_bet), 0),
                        COALESCE(SUM(main_pl), 0), COALESCE(SUM(sidebet_pl), 0),
-                       COALESCE(SUM(power_poker_pl), 0), COALESCE(SUM(star21_pl), 0)
+                       COALESCE(SUM(power_poker_pl), 0), COALESCE(SUM(star21_pl), 0),
+                       COALESCE(SUM(dealer_buster_pl), 0)
                 FROM hands {where}""",
             params,
         ).fetchone()
@@ -888,6 +1013,7 @@ class HistoryDB:
             "lifetime_sidebet_pl": side_pl,
             "lifetime_power_poker_pl": pp_pl,
             "lifetime_star21_pl": s21_pl,
+            "lifetime_dealer_buster_pl": buster_pl,
             "sidebet_occurrences": occurrences,
             "sidebet_wins": wins,
         }
@@ -948,7 +1074,11 @@ class HistoryDB:
                     for name in _LIFETIME_COUNTS:
                         rows[name] = max(0, getattr(legacy, name) - db[name])
                     for name in _LIFETIME_MONEY:
-                        rows[name] = getattr(legacy, name) - db[name]
+                        # A figure the older version never kept (Dealer Buster
+                        # P/L) has nothing to import -- left out, it isn't
+                        # read as a zero total minus everything since.
+                        if name in block:
+                            rows[name] = getattr(legacy, name) - db[name]
                     for prefix, legacy_counts, db_counts in (
                         ("occurrence", legacy.sidebet_occurrences, db["sidebet_occurrences"]),
                         ("win", legacy.sidebet_wins, db["sidebet_wins"]),
@@ -1149,7 +1279,7 @@ class HistoryDB:
 
         row = c.execute(
             """SELECT MAX(peak_bankroll), MIN(lowest_bankroll), MAX(max_drawdown),
-                      MAX(longest_win_streak), MAX(longest_loss_streak) FROM sessions"""
+                      MAX(longest_win_streak), MAX(longest_loss_streak), MAX(longest_push_streak) FROM sessions"""
         ).fetchone()
         all_time: Dict[str, Any] = {
             "peak_bankroll": row[0],
@@ -1157,6 +1287,7 @@ class HistoryDB:
             "max_drawdown": row[2] or 0.0,
             "longest_win_streak": row[3] or 0,
             "longest_loss_streak": row[4] or 0,
+            "longest_push_streak": row[5] or 0,
         }
         all_time.update(hand_extremes("", ()))
 
