@@ -47,6 +47,11 @@ def feed_oracle(o, r):
                     o.record_aces_split()
                 elif first.cards[0].rank in cards.TEN_VALUE_RANKS:
                     o.record_tens_split()
+    for spot in r.spots:                                   # Power Poker / Star 21: judged on every spot's starting hand
+        for key in ("power_poker", "star21"):
+            o.record_sidebet_hand(key, int(spot.side_bet_wagers.get(key, 0) > 0))
+    if r.dealer_played_out:                                # Dealer Buster: once per dealer hand played out (the engine's own flag)
+        o.record_sidebet_hand("dealer_buster", sum(spot.side_bet_wagers.get("dealer_buster", 0) > 0 for spot in r.spots))
     for (spot_index, key), category in r.sidebet_categories.items():
         if category and (key != "dealer_buster" or spot_index == 0):
             o.record_sidebet_occurrence(key, category)
@@ -137,6 +142,7 @@ def run(n_rounds, seed):
         persist.save_state(s.bankroll, s.rules, s.wagers, s.side_bet_wagers)
     PRE["stats"] = hist.load_stats()
     PRE["oracle"] = copy.deepcopy(ORACLE)
+    PRE["rounds"] = rounds
     # a round cut off by quitting
     s.try_set_num_hands(2)
     wagers(s, rng)
@@ -252,12 +258,16 @@ if __name__ == "__main__":
 
     # 7. lifetime stats vs the oracle (before the cut-off round)
     pre, oracle = PRE["stats"], PRE["oracle"]
+    rounds_seen = PRE["rounds"]
     for f in ("hands_lifetime", "player_wins", "dealer_wins", "pushes", "surrenders_lifetime"):
         check(getattr(pre, f) == getattr(oracle, f), f"lifetime {f}: {getattr(pre, f)} vs {getattr(oracle, f)}")
     for f in ("lifetime_main_wagered", "lifetime_main_pl", "lifetime_sidebet_pl", "lifetime_power_poker_pl", "lifetime_star21_pl",
               "lifetime_dealer_buster_pl"):
         check(abs(getattr(pre, f) - getattr(oracle, f)) < 1e-6, f"lifetime {f}")
     check(pre.sidebet_occurrences == oracle.sidebet_occurrences and pre.sidebet_wins == oracle.sidebet_wins, "side-bet occurrences/wins vs oracle")
+    check(pre.sidebet_hands == oracle.sidebet_hands and pre.sidebet_bets == oracle.sidebet_bets,
+          f"side-bet hands/bets tracked vs oracle: {pre.sidebet_hands} {pre.sidebet_bets} vs {oracle.sidebet_hands} {oracle.sidebet_bets}")
+    check(oracle.sidebet_hands["dealer_buster"] < rounds_seen, "(some rounds' dealer hands weren't played out, so the Buster sample is smaller)")
 
     print("ALL AUDITS PASSED" if not fails else "FAILURES:")
     for f in sorted(set(fails))[:12]:

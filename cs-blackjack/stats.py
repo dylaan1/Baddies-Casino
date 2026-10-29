@@ -27,6 +27,11 @@ class Stats:
     sidebet_occurrences/sidebet_wins, shown in their own per-bet tables on
     the 'stats' screen to help gauge whether a payout (adjustable via the
     "<sidebet> <category> <payout>" command) is priced the way you want it.
+    Those counts come only from the hands the history database recorded,
+    alongside exactly how many hands that is (sidebet_hands/sidebet_bets),
+    so each one divides into a true rate; the side-bet counts an older
+    version of the game kept are left out, because nothing says how many
+    hands they cover (they started partway through its play).
 
     Session (this session only): win/loss/push/surrender/double/split
     tallies, aces- and tens-split counts, player/dealer blackjacks dealt,
@@ -59,6 +64,13 @@ class Stats:
     # Same keying, but only counts an occurrence that actually paid out --
     # i.e. it happened *and* the player had a wager on that bet that round.
     sidebet_wins: Dict[str, int] = field(default_factory=dict)
+    # What the two dicts above are out of, per side bet ("power_poker",
+    # "star21", "dealer_buster"): how many times it was dealt -- each spot's
+    # starting hand for Power Poker and Star 21, each dealer hand played out
+    # for Dealer Buster (see Round.dealer_played_out) -- and how many of
+    # those had a wager on it. occurrences / hands and wins / bets are rates.
+    sidebet_hands: Dict[str, int] = field(default_factory=dict)
+    sidebet_bets: Dict[str, int] = field(default_factory=dict)
 
     # ---- Session ----
     hands_this_session: int = 0

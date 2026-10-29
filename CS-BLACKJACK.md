@@ -372,7 +372,16 @@ adds a sound beyond the ordinary card-deal ones.
   actually *won* (occurred **and** you had a wager on it that round). That
   data exists to help gauge whether a payout (adjustable live — see
   **Side bets**) is priced the way you want it, not just to show off a
-  big number. Star 21 always shows its full 9-category standard table
+  big number — so under each title a **Tracked** line says exactly what
+  the counts are out of: *Dealt* ÷ hands and *Won* ÷ bets are true rates.
+  Power Poker and Star 21 are judged on every spot's starting hand;
+  Buster on every dealer hand played out (the dealer plays out whenever a
+  hand is still live or a Buster bet is riding — otherwise it can't bust,
+  so those rounds aren't counted). All of it comes from the hands the
+  history database recorded; the side-bet counts an older version of the
+  game kept aren't added in, because they began partway through its play
+  and nothing records how many hands they cover (they're kept, as
+  imported, in `imported_stats`). Star 21 always shows its full 9-category standard table
   and Buster its 6-category multi-deck table here, regardless of the
   shoe's live deck count, so this history reads the same no matter what
   the table's playing right now — only the *live* inline payout table on
@@ -729,7 +738,9 @@ database existed, the game counted lifetime numbers itself and kept them in
 the state file: the first launch that finds them imports them into the
 database's `imported_stats` table (only the part the database doesn't
 already hold), and from then on the state file no longer carries any stats.
-Figures come across with their sign (a losing side bet stays a loss). Until
+Figures come across with their sign (a losing side bet stays a loss). The
+older side-bet dealt/won counts are stored too, but not shown in the
+side-bet tables (see **Bankroll and statistics**). Until
 that import succeeds they stay in the state file untouched, so they can never
 be lost. (They go into the first database the game opens after the
 upgrade — if that's a fresh `--db` file rather than your usual one, that's

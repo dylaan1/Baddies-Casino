@@ -80,9 +80,11 @@ check((st.hands_lifetime, st.player_wins, st.dealer_wins, st.pushes, st.surrende
 check(st.sessions_played == 12 + 1, f"sessions played = the 12 the old game counted + this new one ({st.sessions_played})")
 check(abs(st.lifetime_main_wagered - 25000) < 1e-9 and abs(st.lifetime_main_pl + 750) < 1e-9 and abs(st.lifetime_sidebet_pl - 120) < 1e-9
       and abs(st.lifetime_power_poker_pl - 100) < 1e-9 and abs(st.lifetime_star21_pl - 20) < 1e-9, "the money figures come across exactly")
-check(st.sidebet_occurrences == {"power_poker:flush": 9, "dealer_buster:8+": 4, "power_poker:royalflush": 2},
-      f"side-bet occurrences come across, including the oldest special-cased counter: {st.sidebet_occurrences}")
-check(st.sidebet_wins == {"power_poker:flush": 3}, "side-bet wins come across")
+check(st.sidebet_occurrences == {} and st.sidebet_wins == {} and not any(st.sidebet_hands.values()),
+      "the older game's side-bet dealt/won counts aren't added to the tables: nothing records how many hands they cover")
+kept = {k: v for k, v in hist.conn.execute("select stat_key, stat_value from imported_stats where stat_key like 'occurrence:%' or stat_key like 'win:%'")}
+check(kept == {"occurrence:power_poker:flush": 9, "occurrence:dealer_buster:8+": 4, "occurrence:power_poker:royalflush": 2, "win:power_poker:flush": 3},
+      f"...but they're kept as imported, including the oldest special-cased counter: {kept}")
 check(st.hands_this_session == 0 and st.session_main_pl == 0, "the imported numbers are lifetime only -- this session starts at zero")
 check(abs(st.ev_percent() - (-750 / 25000 * 100)) < 1e-9, f"EV% works from the imported baseline ({st.ev_percent():.2f}%)")
 rows = hist.conn.execute("select count(*) from imported_stats").fetchone()[0]
@@ -141,6 +143,9 @@ s.rules.dealer_buster.enabled = True
 s.rules.dealer_buster.max_bet = 100
 s.side_bet_wagers[0]["dealer_buster"] = 5
 play(s, 40, seed=9)
+check(s.stats.sidebet_hands == {"power_poker": 40, "star21": 40, "dealer_buster": 40}
+      and s.stats.sidebet_bets == {"power_poker": 0, "star21": 0, "dealer_buster": 40},
+      f"40 one-spot rounds with only Buster bet: 40 hands for each bet, 40 Buster bets ({s.stats.sidebet_hands}, {s.stats.sidebet_bets})")
 db_buster = hist.conn.execute("select sum(dealer_buster_pl) from hands").fetchone()[0]
 hist.close(s)
 Path(persist.STATE_PATH).write_text(json.dumps(LEGACY))       # its stats block has no lifetime_dealer_buster_pl

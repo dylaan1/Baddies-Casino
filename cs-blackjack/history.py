@@ -860,13 +860,20 @@ class HistoryDB:
         genuinely gone from the bankroll."""
         stats = Stats()
         life = self._lifetime_metrics()
-        base_numeric, base_occurrences, base_wins = self._baseline()
+        base_numeric = self._baseline()
         for name in _LIFETIME_COUNTS:
             setattr(stats, name, int(life[name] + base_numeric.get(name, 0)))
         for name in _LIFETIME_MONEY:
             setattr(stats, name, float(life[name] + base_numeric.get(name, 0.0)))
-        stats.sidebet_occurrences = _merge_counts(life["sidebet_occurrences"], base_occurrences)
-        stats.sidebet_wins = _merge_counts(life["sidebet_wins"], base_wins)
+        # The side-bet tables count only the hands recorded here, beside how
+        # many hands that is (sidebet_hands/bets), so they divide into true
+        # rates. The older game's imported side-bet counts stay in
+        # imported_stats but aren't added: they began partway through its
+        # play, and nothing records how many hands they cover.
+        stats.sidebet_occurrences = dict(life["sidebet_occurrences"])
+        stats.sidebet_wins = dict(life["sidebet_wins"])
+        stats.sidebet_hands = dict(life["sidebet_hands"])
+        stats.sidebet_bets = dict(life["sidebet_bets"])
         if self.session_id is not None:
             for name, value in self._session_metrics(self.session_id).items():
                 if hasattr(stats, name):
@@ -1002,6 +1009,31 @@ class HistoryDB:
                 occurrences[f"{bet}:{category}"] = n
                 if paid:
                     wins[f"{bet}:{category}"] = paid
+        # What those counts are out of. Power Poker and Star 21 are judged on
+        # every spot's starting hand, wagered or not -- even in a round later
+        # cut off by quitting, since they settle on the deal.
+        spots, pp_bets, s21_bets = c.execute(
+            f"""SELECT COUNT(*), COALESCE(SUM(power_poker_wager > 0), 0), COALESCE(SUM(star21_wager > 0), 0)
+                FROM hands {where + ' AND' if where else 'WHERE'} hand_number = 1""",
+            params,
+        ).fetchone()
+        # Dealer Buster is out of the rounds whose dealer hand was played out
+        # (Round.dealer_played_out), told from the rows the same way the game
+        # decides it: a dealer blackjack, a Buster bet riding, or a player hand
+        # still live once play ended. A round cut off by quitting (a hand left
+        # 'abandoned') never settled it. (One cut off in the middle of the
+        # dealer's draw, with every hand already decided, can't be told apart
+        # from a finished one -- a round at most, and only by closing the
+        # window during that draw.)
+        buster_hands, buster_bets = c.execute(
+            f"""SELECT COUNT(*), COALESCE(SUM(bets), 0) FROM (
+                    SELECT SUM(dealer_buster_wager > 0) AS bets FROM hands {where}
+                    GROUP BY round_id
+                    HAVING SUM(outcome = 'abandoned') = 0
+                       AND (MAX(dealer_blackjack) = 1 OR SUM(dealer_buster_wager > 0) > 0
+                            OR SUM(player_bust = 0 AND surrendered = 0 AND even_money = 0 AND player_blackjack = 0) > 0))""",
+            params,
+        ).fetchone()
         return {
             "hands_lifetime": hands,
             "player_wins": won,
@@ -1016,6 +1048,8 @@ class HistoryDB:
             "lifetime_dealer_buster_pl": buster_pl,
             "sidebet_occurrences": occurrences,
             "sidebet_wins": wins,
+            "sidebet_hands": {"power_poker": spots, "star21": spots, "dealer_buster": buster_hands},
+            "sidebet_bets": {"power_poker": pp_bets, "star21": s21_bets, "dealer_buster": buster_bets},
         }
 
     def _add_round_to_lifetime(self, round_id: int) -> None:
@@ -1025,26 +1059,21 @@ class HistoryDB:
         delta = self._scan_lifetime("WHERE round_id = ?", (round_id,))
         merged: Dict[str, Any] = {}
         for key, value in self._life_cache.items():
-            if key in ("sidebet_occurrences", "sidebet_wins"):
+            if key in ("sidebet_occurrences", "sidebet_wins", "sidebet_hands", "sidebet_bets"):
                 merged[key] = _merge_counts(value, delta[key])
             else:
                 merged[key] = value + delta[key]
         self._life_cache = merged
 
-    def _baseline(self) -> Tuple[Dict[str, float], Dict[str, int], Dict[str, int]]:
-        """The imported pre-database lifetime numbers: (counters, side-bet
-        occurrences, side-bet wins)."""
-        numeric: Dict[str, float] = {}
-        occurrences: Dict[str, int] = {}
-        wins: Dict[str, int] = {}
-        for key, value in self.conn.execute("SELECT stat_key, stat_value FROM imported_stats"):
-            if key.startswith("occurrence:"):
-                occurrences[key[len("occurrence:"):]] = int(value)
-            elif key.startswith("win:"):
-                wins[key[len("win:"):]] = int(value)
-            else:
-                numeric[key] = value
-        return numeric, occurrences, wins
+    def _baseline(self) -> Dict[str, float]:
+        """The imported pre-database lifetime counters and money figures. Its
+        side-bet occurrence:/win: rows are kept in imported_stats, but not
+        returned: see load_stats."""
+        return {
+            key: value
+            for key, value in self.conn.execute("SELECT stat_key, stat_value FROM imported_stats")
+            if not key.startswith(("occurrence:", "win:"))
+        }
 
     def import_pending_legacy_stats(self) -> bool:
         """Take in the lifetime stats an older version of the game kept in its

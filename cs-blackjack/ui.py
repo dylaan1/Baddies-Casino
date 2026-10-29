@@ -1629,7 +1629,8 @@ def render_stats_screen(stdscr, session: GameSession, round_: Optional[Round]) -
     2-sub-column table, a wider gap between the two tables than within
     one); Power Poker/Star 21/Buster side by side beneath that, each its own
     4-column (category/payout/dealt/won) table titled with that bet's
-    lifetime P/L. Every column has names left-aligned and values
+    lifetime P/L, over a line saying what its Dealt and Won counts are out
+    of (hands dealt, bets placed). Every column has names left-aligned and values
     right-aligned, the same convention throughout -- nothing staggers row
     to row. The top tables' columns are sized to what's in them: each one
     as wide as its longest name, a fixed gap, and its longest value, so a
@@ -1677,6 +1678,15 @@ def render_stats_screen(stdscr, session: GameSession, round_: Optional[Round]) -
         for (bet_key, _table_key, _title), (title, _rows) in zip(SIDEBET_STATS_TABLES, sidebet_tables)
     ]
     lines.append(table_gap.join(f"{title:<{sb_table_w}}" for title in titles).rstrip())
+    # What each table's Dealt and Won columns are out of: the hands (for
+    # Buster, the dealer hands played out) and the bets placed since the
+    # history database began recording them -- see Stats.sidebet_hands.
+    tracked = [
+        f"Tracked: {display_stats.sidebet_hands.get(bet_key, 0):,} "
+        f"{'dealer hands' if bet_key == 'dealer_buster' else 'hands'}, {display_stats.sidebet_bets.get(bet_key, 0):,} bets"
+        for bet_key, _table_key, _title in SIDEBET_STATS_TABLES
+    ]
+    lines.append("  " + table_gap.join(f"{text:<{sb_table_w}}" for text in tracked).rstrip())
     lines.append(
         "  "
         + table_gap.join(f"{'Category':<{name_w}}{'Payout':>{payout_w}}{'Dealt':>{dealt_w}}{'Won':>{won_w}}" for _ in sidebet_tables)
