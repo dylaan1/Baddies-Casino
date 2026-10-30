@@ -287,7 +287,7 @@ match, no restart needed.
   | 6 | 12:1 | 12:1 |
   | 5 | 4:1 | 4:1 |
   | 4 | 3:1 | 3:1 |
-  | 3 | 2:1 | 2:1 |
+  | 3 | 3:2 | 3:2 |
 
   Whenever a shoe is cut (session start, `newshoe`, or the automatic
   post-round reshuffle) that no longer supports an enabled Power Poker or
