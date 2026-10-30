@@ -11,10 +11,10 @@ S.reset_data()
 
 
 def new_session(decks=1, hands=1):
-    bankroll, rules, wagers, sbw = persist.load_state()
+    rules, wagers, sbw = persist.load_state()
     rules.num_decks, rules.num_hands, rules.surrender = decks, hands, "off"
     hist = history.HistoryDB.open()
-    s = engine.GameSession(bankroll, rules, wagers, sbw, history=hist)
+    s = S.game_session(rules, wagers, sbw, hist)
     s.wagers[:] = [10, 10, 10]
     return s, hist
 

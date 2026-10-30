@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Tuple
 from .rules import Rules
 
 STATE_PATH = Path.home() / ".cs-blackjack_state.json"
-DEFAULT_BANKROLL = 10_000.0
 SIDE_BET_KEYS = ("power_poker", "star21", "dealer_buster")
 
 # Bumped whenever the shape of the saved JSON changes in a way an older copy
@@ -18,9 +17,12 @@ SIDE_BET_KEYS = ("power_poker", "star21", "dealer_buster")
 # Version 3 stopped saving lifetime/session stats here: they live in the
 # history database now. A `stats` block found in an older file is carried
 # along untouched until the database has imported it (see legacy stats below).
-STATE_SCHEMA_VERSION = 3
+# Version 4 stopped saving the bankroll: it lives in the casino bank now
+# (casino/bank.py). A `bankroll` found in an older file is likewise carried
+# along until the bank exists (see legacy bankroll below).
+STATE_SCHEMA_VERSION = 4
 
-State = Tuple[float, Rules, List[float], List[Dict[str, float]]]
+State = Tuple[Rules, List[float], List[Dict[str, float]]]
 
 _load_warning: Optional[str] = None
 # The `stats` block of an older state file that the history database hasn't
@@ -28,6 +30,10 @@ _load_warning: Optional[str] = None
 # lifetime numbers from before the database existed can never be lost just
 # because the database was unavailable for a launch.
 _pending_legacy_stats: Optional[dict] = None
+# The same for the bankroll an older state file kept, before the casino bank
+# existed: written back on every save until the bank's own file has it (see
+# blackjack/bank.py), so it can't be lost if the bank couldn't be created.
+_pending_legacy_bankroll: Optional[float] = None
 
 
 def take_load_warning() -> Optional[str]:
@@ -49,7 +55,6 @@ def _default_side_bet_wagers() -> List[Dict[str, float]]:
 def _default_state() -> State:
     rules = Rules()
     return (
-        DEFAULT_BANKROLL,
         rules,
         _default_wagers(rules.default_bet),
         _default_side_bet_wagers(),
@@ -68,6 +73,30 @@ def set_legacy_stats(block: Optional[dict]) -> None:
 def clear_legacy_stats() -> None:
     """Called once the history database has imported the legacy stats."""
     set_legacy_stats(None)
+
+
+def pending_legacy_bankroll() -> Optional[float]:
+    return _pending_legacy_bankroll
+
+
+def set_legacy_bankroll(amount: Optional[float]) -> None:
+    global _pending_legacy_bankroll
+    _pending_legacy_bankroll = amount
+
+
+def clear_legacy_bankroll() -> None:
+    """Called once the casino bank's own file holds the bankroll."""
+    set_legacy_bankroll(None)
+
+
+def read_legacy_bankroll(path: Path) -> Optional[float]:
+    """The bankroll a state file from before the casino bank kept, else
+    None. Never raises."""
+    try:
+        amount = json.loads(path.read_text(encoding="utf8")).get("bankroll")
+        return None if amount is None else float(amount)
+    except (ValueError, TypeError, OSError, AttributeError):
+        return None
 
 
 def read_legacy_stats(path: Path) -> Optional[dict]:
@@ -89,9 +118,10 @@ def read_state_file(path: Path) -> State:
     (load_state)."""
     data = json.loads(path.read_text(encoding="utf8"))
     # data["schema_version"] (absent = 1) needs no migration yet: version 2
-    # only added the key itself. Future format changes upgrade `data` here,
-    # before anything below reads it.
-    bankroll = float(data.get("bankroll", DEFAULT_BANKROLL))
+    # only added the key itself, and the parts versions 3 and 4 moved out
+    # (stats, bankroll) are read separately -- read_legacy_stats/
+    # read_legacy_bankroll. Future format changes upgrade `data` here, before
+    # anything below reads it.
     rules = Rules.from_dict(data.get("rules", {})) if data.get("rules") else Rules()
 
     wagers = data.get("wagers")
@@ -103,11 +133,12 @@ def read_state_file(path: Path) -> State:
     else:
         side_bet_wagers = _default_side_bet_wagers()
 
-    return bankroll, rules, wagers, side_bet_wagers
+    return rules, wagers, side_bet_wagers
 
 
 def load_state() -> State:
-    """Return (bankroll, rules, wagers, side_bet_wagers).
+    """Return (rules, wagers, side_bet_wagers). (The bankroll is the casino
+    bank's -- see blackjack/bank.py.)
 
     Falls back to fresh defaults on any missing or corrupt state file
     rather than crashing the game. A corrupt file is renamed aside first
@@ -119,6 +150,7 @@ def load_state() -> State:
         try:
             state = read_state_file(STATE_PATH)
             set_legacy_stats(read_legacy_stats(STATE_PATH))
+            set_legacy_bankroll(read_legacy_bankroll(STATE_PATH))
             return state
         except (ValueError, TypeError, KeyError, AttributeError, OSError):
             aside = STATE_PATH.with_name(f"{STATE_PATH.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
@@ -150,7 +182,6 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 def save_state(
-    bankroll: float,
     rules: Rules,
     wagers: List[float],
     side_bet_wagers: List[Dict[str, float]],
@@ -159,13 +190,14 @@ def save_state(
     failed, so a read-only disk never takes the game down with it."""
     data = {
         "schema_version": STATE_SCHEMA_VERSION,
-        "bankroll": bankroll,
         "rules": rules.to_dict(),
         "wagers": list(wagers),
         "side_bet_wagers": [dict(d) for d in side_bet_wagers],
     }
     if _pending_legacy_stats:
         data["stats"] = _pending_legacy_stats  # not imported into the database yet -- keep it safe
+    if _pending_legacy_bankroll is not None:
+        data["bankroll"] = _pending_legacy_bankroll  # not in the casino bank's file yet -- keep it safe
     try:
         atomic_write_text(STATE_PATH, json.dumps(data, indent=2))
     except OSError:

@@ -15,9 +15,9 @@ S.reset_data()
 
 
 def new_session(hist=None):
-    bankroll, rules, wagers, sbw = persist.load_state()
+    rules, wagers, sbw = persist.load_state()
     hist = hist or history.HistoryDB.open()
-    s = engine.GameSession(bankroll, rules, wagers, sbw, history=hist)
+    s = S.game_session(rules, wagers, sbw, hist)
     s.ensure_shoe_ready()
     return s, hist
 
@@ -30,7 +30,7 @@ def play(s, n, seed=0):
         assert r, err
         s.history.record_round(s, r)
         s.ensure_shoe_ready()
-        persist.save_state(s.bankroll, s.rules, s.wagers, s.side_bet_wagers)
+        S.ui.save_game(s)
 
 
 cmd = lambda s, text, in_round=False: commands.handle_command(text, s, in_round)
@@ -81,7 +81,7 @@ bdb = sqlite3.connect(history.BACKUP_DIR / b1 / "blackjack.db")
 rows_at_backup = bdb.execute("select count(*) from hands").fetchone()[0]
 bdb.close()
 check(rows_at_backup == n_rows(hist), "backup DB has the same hand rows as live at that moment")
-bankroll_at_backup, hands_life_at_backup = s.bankroll, s.stats.hands_lifetime
+hands_life_at_backup = s.stats.hands_lifetime
 
 # ------------------------------------------------------------------ restore
 play(s, 25, seed=5)
@@ -90,12 +90,15 @@ check(cmd(s, "restore nosuch").startswith("No backup named"), "restore of an unk
 check(cmd(s, "restore").startswith("Usage: restore"), "restore with no name -> usage")
 msg = cmd(s, "restore " + b1[:8])
 check(s.pending_restore == b1 and "confirm" in msg, "restore <prefix> resolves the full name and asks to confirm")
+bankroll_before_restore = s.bankroll
 err = s.restore_backup(s.pending_restore)
 check(err is None, f"restore succeeded ({err})")
 hist = s.history
 check(n_rows(hist) == rows_at_backup, f"restored DB is back to the backup's {rows_at_backup} hand rows")
-check(s.bankroll == bankroll_at_backup and s.stats.hands_lifetime == hands_life_at_backup, "bankroll restored, and the stats (read from the database) match")
-check(json.loads(persist.STATE_PATH.read_text())["bankroll"] == bankroll_at_backup, "the state file on disk was restored too")
+check(s.stats.hands_lifetime == hands_life_at_backup, "the stats (read from the database) match the backup")
+check(persist.STATE_PATH.read_text() == (history.BACKUP_DIR / b1 / "state.json").read_text(), "the state file on disk was restored too")
+check(s.bankroll == bankroll_before_restore and abs(S.casino_bank.Bank.open().balance - s.bankroll) < 1e-9,
+      "...but the bankroll is the casino bank's, and a blackjack restore leaves it as it was")
 names = [b["name"] for b in hist.list_backups()]
 check(any(n.endswith("pre-restore") for n in names), f"a pre-restore safety backup was taken: {names}")
 check(hist.conn.execute("select count(*) from sessions where ended_at is null").fetchone()[0] == 1 and hist.session_id is not None, "exactly one open session after restore (the new one)")
@@ -156,9 +159,10 @@ s2.history.close(s2)
 
 # ------------------------------------------------------------------ a corrupt state file is quarantined, never overwritten
 persist.STATE_PATH.write_text('{"bankroll": 123, "rules": ')
-bankroll, rules, w, sb = persist.load_state()
+rules, w, sb = persist.load_state()
 warn = persist.take_load_warning()
-check(bankroll == persist.DEFAULT_BANKROLL and warn and "set aside" in warn, f"corrupt state -> defaults + a warning: {warn}")
+check(rules.to_dict() == rules_m.Rules().to_dict() and w == [rules.default_bet, 0.0, 0.0] and warn and "set aside" in warn,
+      f"corrupt state -> defaults + a warning: {warn}")
 aside = list(Path(HOME).glob(".cs-blackjack_state.json.corrupt-*"))
 check(len(aside) == 1 and aside[0].read_text() == '{"bankroll": 123, "rules": ', "the corrupt file is preserved byte for byte")
 check(not persist.STATE_PATH.exists(), "...and is no longer at the live path (so it can't be silently overwritten)")
@@ -170,16 +174,20 @@ check(persist.take_load_warning() is not None, "a valid-JSON-but-wrong-shape fil
 # ------------------------------------------------------------------ an older state file still loads; its stats block waits for the import
 legacy = {"bankroll": 777.5, "rules": {}, "stats": {"hands_lifetime": 12, "royal_flushes": 3}, "wagers": [25, 0, 0]}
 persist.STATE_PATH.write_text(json.dumps(legacy))
-bankroll, rules, w, sb = persist.load_state()
-check(bankroll == 777.5 and w[0] == 25, "an older state file loads")
+rules, w, sb = persist.load_state()
+check(w[0] == 25, "an older state file loads")
 check(persist.pending_legacy_stats() == {"hands_lifetime": 12, "royal_flushes": 3}, "...and its stats block waits to be imported")
-persist.save_state(bankroll, rules, w, sb)
+check(persist.pending_legacy_bankroll() == 777.5, "...and so does its bankroll, for the casino bank")
+persist.save_state(rules, w, sb)
 saved = json.loads(persist.STATE_PATH.read_text())
-check(saved["schema_version"] == persist.STATE_SCHEMA_VERSION == 3, "a save writes schema_version 3")
-check(saved["stats"] == {"hands_lifetime": 12, "royal_flushes": 3}, "...and carries the not-yet-imported stats through untouched")
+check(saved["schema_version"] == persist.STATE_SCHEMA_VERSION == 4, "a save writes schema_version 4")
+check(saved["stats"] == {"hands_lifetime": 12, "royal_flushes": 3} and saved["bankroll"] == 777.5,
+      "...and carries the not-yet-imported stats and bankroll through untouched")
 persist.clear_legacy_stats()
-persist.save_state(bankroll, rules, w, sb)
-check("stats" not in json.loads(persist.STATE_PATH.read_text()), "once imported (cleared), the state file carries no stats")
+persist.clear_legacy_bankroll()
+persist.save_state(rules, w, sb)
+saved = json.loads(persist.STATE_PATH.read_text())
+check("stats" not in saved and "bankroll" not in saved, "once they're taken in (cleared), the state file carries no stats and no bankroll")
 
 good = persist.STATE_PATH.read_text()
 real_replace = os.replace
@@ -191,7 +199,7 @@ def boom(*a, **k):
 
 os.replace = boom
 try:
-    ok = persist.save_state(1.0, rules, w, sb)
+    ok = persist.save_state(rules, w, sb)
 finally:
     os.replace = real_replace
 check(ok is False and persist.STATE_PATH.read_text() == good, "a failed save returns False and leaves the previous state intact")
@@ -211,8 +219,8 @@ blocker = Path(HOME) / "iamafile"
 blocker.write_text("x")
 dead = history.HistoryDB.open(blocker / "sub" / "x.db")      # the parent 'directory' is a file
 check(dead.conn is None and dead.error, f"an unopenable path records an error and raises nothing: {dead.error}")
-bankroll, rules, w, sb = persist.load_state()
-s3 = engine.GameSession(bankroll, rules, w, sb, history=dead)
+rules, w, sb = persist.load_state()
+s3 = S.game_session(rules, w, sb, dead)
 s3.ensure_shoe_ready()
 s3.wagers[0] = 10
 r, err = S.play_round(s3, random.Random(3))
@@ -248,7 +256,22 @@ s5, h5 = new_session()
 play(s5, 40, seed=31)
 ov = h5.overview()
 check(ov["session"] is not None and ov["counts"]["hands"] == n_rows(h5) and len(ov["hand_types"]) == 6, "overview() has the session, the counts, and 6 hand-type rows")
-check(ov["all_time"]["peak_bankroll"] >= ov["session"]["peak_bankroll"] - 1e-9, "all-time peak >= this session's peak")
+check(not any("bankroll" in k for k in ov["all_time"]), "the stats screen's figures hold no bankroll range")
+running, lowest = 0.0, 0.0
+for (pl,) in h5.conn.execute("select sum(total_pl) from hands group by round_id order by round_id"):
+    running += pl
+    lowest = min(lowest, running)
+check(abs(ov["all_time"]["max_drawdown"] - lowest) < 1e-9 and abs(ov["session"]["max_drawdown"] - lowest) < 1e-9 and lowest <= 0,
+      f"max drawdown is the lowest the running P/L has been, round by round, from $0 ({lowest:.2f}; one session, so both columns agree)")
+s5.reset_session()
+play(s5, 15, seed=32)
+ov = h5.overview()
+running, low_sess = 0.0, 0.0
+for (pl,) in h5.conn.execute("select sum(total_pl) from hands where session_id=? group by round_id order by round_id", (h5.session_id,)):
+    running += pl
+    low_sess = min(low_sess, running)
+check(abs(ov["session"]["max_drawdown"] - low_sess) < 1e-9 and ov["all_time"]["max_drawdown"] <= lowest + 1e-9,
+      f"a new session's drawdown starts from its own $0 ({low_sess:.2f}); the lifetime figure never rises ({ov['all_time']['max_drawdown']:.2f})")
 h5.close(s5)
 
 check.finish("check_data_safety")

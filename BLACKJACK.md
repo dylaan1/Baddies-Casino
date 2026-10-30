@@ -1,5 +1,35 @@
 # Baddie's Casino™
 
+## The Bank
+
+Every game plays from one bankroll, held by the casino bank in
+`~/.baddies-casino/bank.json` rather than in any one game's save. The bank
+keeps two things apart: what the **games** have won or lost (a running total
+per game), and what **you** have deposited or withdrawn (each one listed with
+its date, amount, and the balance after it). Both go into the balance:
+
+    balance = deposited − withdrawn + what the games have won
+
+Money moves in and out with blackjack's `bank` commands (`bank add N`,
+`bank N`, `bank reset`), each recorded as a deposit or withdrawal. A game
+reports its results to the bank every time it saves (after every round, and
+on quit).
+
+Every change is written to the bank file straight away (atomically, under a
+lock), so two programs sharing it, such as the same game open in two
+terminals, never undo each other's updates. A change that couldn't be
+written (a full disk, say) is held and goes in with the next write that
+works. A bank file that can't be read is set aside as
+`bank.json.corrupt-<timestamp>`, never overwritten, and the game says so.
+
+**The first launch after upgrading** carries the bankroll blackjack used to
+keep in `~/.cs-blackjack_state.json` into the bank. Your lifetime blackjack
+P/L (imported pre-database play included) becomes blackjack's winnings, and
+the rest of the balance counts as deposited, so the two add up to exactly the
+bankroll you had. A brand-new player starts with a $10,000.00 opening
+deposit. Until the bank's file exists, the state file keeps carrying the
+bankroll, so it can't be lost.
+
 ## Blackjack
 
 A full-screen, terminal-based blackjack game built for practicing real-money
@@ -416,7 +446,8 @@ adds a sound beyond the ordinary card-deal ones.
   the shoe, or reshuffle plus reset session stats. Neither one touches
   your bankroll.
 - `bank reset` (RETURN confirms) resets just the bankroll to its default,
-  independent of the shoe or any stats.
+  independent of the shoe or any stats. The casino bank records it as a
+  deposit or withdrawal of the difference.
 - `newsession` ends the current session in the history log and starts a new
   one, so the session panel starts over; nothing is ever erased.
 
@@ -435,11 +466,16 @@ adds a sound beyond the ordinary card-deal ones.
   and the never-dealt remainder, marked off after a `|`, when the shoe is
   retired (including when you quit, press Ctrl-C, or close the window) — so
   it can't be peeked at mid-shoe.
-- **New tracked metrics**, kept per session and all-time: peak and lowest
-  bankroll, max drawdown, longest win/loss/push streaks, biggest hand win and
-  loss, and results by hand type (hard / soft / pairs / blackjacks /
-  doubled / split), shown in a new block at the bottom of the `stats`
-  screen. The Main UI's panels are unchanged.
+- **New tracked metrics**, kept per session and all-time: max drawdown,
+  longest win/loss/push streaks, biggest hand win and loss, and results by
+  hand type (hard / soft / pairs / blackjacks / doubled / split), shown in a
+  new block at the bottom of the `stats` screen. **Max drawdown** is the
+  lowest your running blackjack P/L (main wagers and side bets, round by
+  round) has ever been: all time, counted from $0 at the first hand in the
+  history database; this session, from $0 at the session's first hand. It
+  reads $0.00 if you've never been below even. (The stats screen shows no
+  bankroll figures: the bankroll is the casino bank's, and deposits and
+  withdrawals would muddy them.) The Main UI's panels are unchanged.
 - **`export`, `backup`, `backups`, `restore`** — CSV/JSON export, an
   `export mysql` script that recreates the whole database in MySQL/MariaDB,
   and validated snapshots that can be restored (with an automatic safety
@@ -518,9 +554,10 @@ Run it as a module from the repository root:
 python3 -m blackjack
 ```
 
-The game maximizes your terminal window on launch. Your bankroll, wagers,
-and table rules are saved to `~/.cs-blackjack_state.json` and reloaded
-automatically the next time you launch. (Your data keeps the game's earlier
+The game maximizes your terminal window on launch. Your wagers and
+table rules are saved to `~/.cs-blackjack_state.json` and reloaded
+automatically the next time you launch; your bankroll is the casino bank's
+(see **The Bank**). (Your data keeps the game's earlier
 name, `cs-blackjack`, so existing saves and history carry straight on.)
 Every hand, session, and shoe is
 logged to a SQLite database at `~/.cs-blackjack/blackjack.db`, and all of
@@ -592,6 +629,10 @@ any time by launching without `--db`.
 | `bank reset` | Reset bankroll to its default (RETURN confirms) |
 | `bank default N` | Set the bankroll `bank reset` resets to |
 
+The bankroll is the casino bank's, shared by every game: `bank N`, `bank add
+N` and `bank reset` are recorded there as deposits or withdrawals (see **The
+Bank**). `bank default` is a blackjack setting.
+
 **Table setup**
 
 | Command | Effect |
@@ -634,7 +675,7 @@ a whole number is shown as the fraction it equals: `buster 3 1.5` reads
 | `export mysql` | Write the whole database as a MySQL/MariaDB `.sql` script to `~/.cs-blackjack/exports/` |
 | `backup` | Snapshot the history database + live state to `~/.cs-blackjack/backups/` |
 | `backups` | List saved backups |
-| `restore <name>` | Replace all current data with a backup (type `confirm`; a safety backup is taken first) |
+| `restore <name>` | Replace all blackjack data with a backup (type `confirm`; a safety backup is taken first; your casino bank balance is kept) |
 
 **Reference**
 
@@ -675,13 +716,15 @@ table, so there's no separate command to look them up.
 
 | File | Responsibility |
 |---|---|
+| `../casino/bank.py` | The casino bank: the shared bankroll in `~/.baddies-casino/bank.json` (atomic, locked writes; deposits, withdrawals, and winnings per game) |
+| `bank.py` | Blackjack's link to the casino bank: opening it, and carrying blackjack's old bankroll into it the first time |
 | `cards.py` | `Card`, `Shoe` (shuffling, drawing, Hi-Lo running/true count) |
 | `hand.py` | `Hand` — cards, totals (soft/hard), blackjack/bust/split/double state |
 | `dealer.py` | Dealer drawing logic (S17/H17) |
 | `sidebets.py` | Power Poker / Star 21 (standard + double-deck) / Dealer Buster evaluators and their deck-count gating |
 | `rules.py` | `Rules`/`SideBetRules` — every configurable table rule, with JSON (de)serialization |
 | `stats.py` | `Stats` — the lifetime/session numbers the panels show (a read-only snapshot of what the database says) |
-| `persist.py` | Load/save the live game state to `~/.cs-blackjack_state.json` (atomic writes, schema version, corrupt-file quarantine) |
+| `persist.py` | Load/save the live game state (rules, wagers) to `~/.cs-blackjack_state.json` (atomic writes, schema version, corrupt-file quarantine) |
 | `history.py` | The SQLite history log (`sessions`/`shoes`/`hands` in `~/.cs-blackjack/blackjack.db`), every stat query, plus `export` (CSV/JSON/MySQL), `backup`, and `restore` |
 | `commands.py` | Parses and applies every CLI command |
 | `engine.py` | `GameSession`/`Round` — the full round state machine: dealing order, prelim prompts, player actions, settlement timing |
@@ -710,10 +753,11 @@ CSBJ_FULL=1 python3 -m unittest discover -s tests   # also the mutation check an
 | `check_split_cap.py` | One split per hand on a single deck, and only there |
 | `check_history_reshuffle.py` | How the log records a round that ran the shoe dry (start shoe, the `reshuffled_mid_round` flag, the exact cards of both shoes), and upgrades of older database versions |
 | `check_stats_and_import.py` | Every lifetime and session figure comes from the database; the one-time import of an older game's stats (including negative figures); `newsession`, `bank reset`, and `--db` |
+| `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, and blackjack's bank commands and results landing in the right column |
 | `check_data_safety.py` | `export`, `backup`, `restore` (and rejecting bad backups), crash recovery, corrupt or newer files, atomic saves, and playing on with no database |
 | `check_locked_db.py` | Another program holding the database: nothing is dropped or mis-attributed, and it all lands, in order, once the lock lifts |
-| `check_audit.py` | Thousands of random rounds with the log attached, checked against ground truth: bankroll conservation, the exact cards dealt, every stat against an independent implementation, the running counts |
-| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`. Needs `pip install pyte`; skipped without it |
+| `check_audit.py` | Thousands of random rounds with the log attached, checked against ground truth: bankroll conservation, the casino bank getting exactly the table's P/L, the exact cards dealt, every stat against an independent implementation, the running counts |
+| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP` (the casino bank included). Needs `pip install pyte`; skipped without it |
 | `tools/mutation_check.py` | Injects known bugs and confirms the checks above fail for each — a check that can't fail proves nothing |
 | `tools/consumption.py`, `tools/montecarlo.py`, `tools/adversary.py` | The measurements behind the minimum-cards floors: cards used per round, crash / failsafe rates per configuration over millions of rounds, and a search over every legal line of play (run them directly; `--help`-style usage is in each file's docstring) |
 
@@ -722,17 +766,19 @@ Runs are repeatable: the game's shuffles use a fixed seed unless you set
 
 ### Data storage
 
-The game keeps two kinds of data:
+The casino and the game keep three kinds of data: the bankroll, the live
+game state, and the history log.
 
 | Where | What |
 |---|---|
-| `~/.cs-blackjack_state.json` | The *live* game state: bankroll, table rules, side-bet payouts, and wagers. Written after every round and on quit. |
+| `~/.baddies-casino/bank.json` | The casino bank: your bankroll, shared by every game, with what each game has won and every deposit and withdrawal (see **The Bank**). Written the moment anything changes. |
+| `~/.cs-blackjack_state.json` | Blackjack's *live* game state: table rules, side-bet payouts, and wagers. Written after every round and on quit. |
 | `~/.cs-blackjack/blackjack.db` | The *history log*: a SQLite database with every hand, session, and shoe ever played, and the source of every stat the game displays. Append-only — nothing in the game erases it. |
 | `~/.cs-blackjack/exports/` | Files written by `export`. |
 | `~/.cs-blackjack/backups/` | Snapshots made by `backup` (and the automatic safety backup before a `restore`). |
 
 Delete `~/.cs-blackjack_state.json` to reset the live state back to
-defaults. To start over with fresh stats, launch with `--db <file>` (see
+defaults (your bankroll, in the bank, is unaffected). To start over with fresh stats, launch with `--db <file>` (see
 **Launch**) rather than deleting anything; deleting `~/.cs-blackjack/` erases
 the history for good.
 
@@ -805,7 +851,7 @@ launches. The row is updated after every round, so it's always current.
 |---|---|
 | `session_id`, `started_at`, `ended_at`, `end_reason` | `end_reason`: `quit`, `newsession`, `restore`, or `abandoned` (databases from older versions of the game may also contain `hardreset`); `ended_at` is `NULL` while running |
 | `starting_bankroll`, `ending_bankroll`, `peak_bankroll`, `lowest_bankroll` | Bankroll as observed at round boundaries |
-| `max_drawdown` | Largest peak-to-trough fall in cumulative session P/L (a `bank add` can't distort it) |
+| `max_drawdown` | Largest peak-to-trough fall in cumulative session P/L (a `bank add` can't distort it). The `stats` screen's Max Drawdown is a different figure, computed from the `hands` rows: the lowest the running P/L has been |
 | `rounds_played`, `hands_played`, `hands_won`, `hands_lost`, `hands_pushed`, `hands_surrendered` | Tallies (a round cut off by quitting isn't counted as played) |
 | `doubles`, `splits`, `aces_split`, `tens_split`, `player_blackjacks`, `dealer_blackjacks`, `dealer_21s`, `dealer_busts` | Same definitions as the in-game Session Stats (`dealer_21s` was `dealer_pulled_21s`, non-blackjack 21s only, before schema v4) |
 | `shoes_played` | `REAL`, in quarter shoes: each of the session's shoes counts by how far it was played toward its cut card (a whole 1.0 once it reached it), totalled and rounded down to the quarter. Before schema v4 it was a whole number of shoes cut, starting at 1 |
@@ -899,8 +945,11 @@ GROUP BY true_count_before ORDER BY true_count_before;
   live state to `~/.cs-blackjack/backups/<timestamp>/`. Not available in the
   middle of a round.
 - **`backups`** — lists them.
-- **`restore <name>`** — replaces *all* current data (history, bankroll,
-  rules, stats) with a backup, after you type `confirm`. A prefix of the
+- **`restore <name>`** — replaces *all* of blackjack's data (history, rules,
+  stats) with a backup, after you type `confirm`. Your bankroll isn't
+  blackjack's to restore: it's the casino bank's, shared by every game, so a
+  restore leaves it as it is (and ignores a bankroll an older backup still
+  carries). A blackjack backup doesn't include the bank file. A prefix of the
   name is enough. The backup is validated first, and a
   `<timestamp>-pre-restore` safety backup of what you're replacing is taken
   before anything is touched — so a restore can itself be undone with

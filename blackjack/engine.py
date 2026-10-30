@@ -31,7 +31,11 @@ from .sidebets import (
 from .stats import Stats
 
 if TYPE_CHECKING:  # pragma: no cover
+    from casino.bank import Bank
+
     from .history import HistoryDB
+
+BANK_GAME_KEY = "blackjack"  # this game's entry in the casino bank's game_winnings (see blackjack/bank.py)
 
 OUTCOME_LABELS = {
     "player_win": "Win",
@@ -170,10 +174,19 @@ class GameSession:
         wagers: Optional[List[float]] = None,
         side_bet_wagers: Optional[List[Dict[str, float]]] = None,
         history: Optional["HistoryDB"] = None,
+        bank: Optional["Bank"] = None,
     ):
         self.history = history
         self.rules = rules
+        # The bankroll the table plays from. It starts as the casino bank's
+        # balance (see blackjack/bank.py) and the game works on it directly
+        # -- wagers come off it, payouts go onto it -- while the bank is told
+        # what changed: money the player moves themselves at once (deposit),
+        # the table's result as each round is saved (sync_bank). Without a
+        # bank (tests, tools) it's just a number.
         self.bankroll = bankroll
+        self.bank = bank
+        self._bank_synced = bankroll  # the bankroll as of the last thing the bank was told
         # Nothing in the game counts stats: the history database does, and
         # replaces this snapshot (HistoryDB._refresh_stats) whenever a
         # session starts, a shoe is cut, or a round is recorded. Without a
@@ -225,10 +238,31 @@ class GameSession:
         )
 
     def adjust_bankroll(self, amount: float) -> None:
+        """Money won or lost at the table (a wager placed, a payout)."""
         self.bankroll += amount
 
-    def set_bankroll(self, amount: float) -> None:
-        self.bankroll = amount
+    def deposit(self, amount: float, note: str) -> None:
+        """Money the player moves in (amount > 0) or out (< 0) of the bankroll
+        themselves ('bank add', 'bank N', 'bank reset'), rather than a result
+        at the table. The bank records it as a deposit or withdrawal, after
+        first catching up on the table's results, so the balance it notes
+        beside it is the bankroll's."""
+        self.sync_bank()
+        self.bankroll += amount
+        self._bank_synced += amount
+        if self.bank is not None:
+            self.bank.transfer(amount, note)
+
+    def set_bankroll(self, amount: float, note: str = "Blackjack: bank N") -> None:
+        self.deposit(amount - self.bankroll, note)
+
+    def sync_bank(self) -> None:
+        """Tell the bank what the table has won or lost since it last heard
+        -- called whenever the game saves (a round settled, quitting)."""
+        won = self.bankroll - self._bank_synced
+        if self.bank is not None and won:
+            self.bank.record_winnings(BANK_GAME_KEY, won)
+        self._bank_synced = self.bankroll
 
     def can_afford(self, amount: float) -> bool:
         return self.bankroll >= amount
@@ -362,8 +396,9 @@ class GameSession:
 
     def reset_bankroll(self) -> None:
         """Reset the bankroll to its configured default (see 'bank default'),
-        e.g. from the 'bank reset' command. Touches nothing else."""
-        self.bankroll = self.rules.default_bankroll
+        e.g. from the 'bank reset' command -- a deposit or withdrawal of the
+        difference, as far as the bank is concerned. Touches nothing else."""
+        self.set_bankroll(self.rules.default_bankroll, "Blackjack: bank reset")
 
     def reset_session(self, reason: str = "newsession") -> None:
         """Start a new session on a brand-new shoe. The bankroll is left
@@ -378,17 +413,17 @@ class GameSession:
         self.reset_shoe(reason)
 
     def restore_backup(self, name: str) -> Optional[str]:
-        """Replace ALL current data (history database, bankroll, rules,
-        wagers) with a saved backup, then start a fresh session on a new
-        shoe. Returns an error string, or None on success.
-        The caller must make sure no round is in progress."""
+        """Replace ALL of blackjack's data (history database, rules, wagers)
+        with a saved backup, then start a fresh session on a new shoe. The
+        bankroll is the casino bank's, shared with every game, so a blackjack
+        restore leaves it as it is. Returns an error string, or None on
+        success. The caller must make sure no round is in progress."""
         if self.history is None:
             return "History database is unavailable."
         try:
-            bankroll, rules, wagers, side_bet_wagers = self.history.restore(self, name)
+            rules, wagers, side_bet_wagers = self.history.restore(self, name)
         except HistoryError as exc:
             return str(exc)
-        self.bankroll = bankroll
         self.rules = rules
         self.wagers = wagers
         self.side_bet_wagers = side_bet_wagers

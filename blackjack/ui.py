@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 from . import commands, persist, sound
+from .bank import open_bank
 from .cards import Card
 from .engine import (
     OUTCOME_LABELS,
@@ -1705,8 +1706,8 @@ def render_stats_screen(stdscr, session: GameSession, round_: Optional[Round]) -
 
 def _history_stats_lines(session: GameSession) -> List[str]:
     """The stats screen's bottom block, read from the history database:
-    bankroll range, drawdown, streaks and best/worst hand (this session |
-    all time), next to results by hand type. (The panels above it come from
+    max drawdown, streaks and best/worst hand (this session | all time),
+    next to results by hand type. (The panels above it come from
     the same database; this block just goes further than they do.)"""
     history = session.history
     overview = history.overview() if history is not None else None
@@ -1732,8 +1733,6 @@ def _history_stats_lines(session: GameSession) -> List[str]:
         return f"{kind}{n}" if n else "-"
 
     metric_rows = [
-        ("Peak Bankroll", money(sess["peak_bankroll"]) if sess else "-", money(alltime["peak_bankroll"] or 0)),
-        ("Lowest Bankroll", money(sess["lowest_bankroll"]) if sess else "-", money(alltime["lowest_bankroll"] or 0)),
         ("Max Drawdown", money(sess["max_drawdown"]) if sess else "-", money(alltime["max_drawdown"])),
         ("Longest Win Streak", streak("W", sess["longest_win_streak"]) if sess else "-", streak("W", alltime["longest_win_streak"])),
         ("Longest Loss Streak", streak("L", sess["longest_loss_streak"]) if sess else "-", streak("L", alltime["longest_loss_streak"])),
@@ -1767,7 +1766,7 @@ def render_backups_screen(stdscr, session: GameSession) -> None:
         lines.append(f"  {b['name']:<40}{b['db_bytes'] / 1024:>9,.0f} KB  {'yes' if b['has_state'] else 'NO'}")
     if not backups:
         lines.append("  (none yet -- 'backup' makes one)")
-    lines.extend(["", "  restore <name>   replaces ALL current data with that backup (a prefix of the name is enough)"])
+    lines.extend(["", "  restore <name>   replaces ALL blackjack data with that backup -- the bank is kept (a prefix of the name is enough)"])
     _render_overlay_lines(stdscr, "Blackjack -- Backups  (~/.cs-blackjack/backups/)", lines)
 
 
@@ -1982,7 +1981,7 @@ def _after_engine_change(round_: Optional[Round], session: GameSession, stdscr) 
     if round_ is not None and round_.phase == Phase.SETTLED:
         if session.history is not None:
             session.history.record_round(session, round_)
-        persist.save_state(session.bankroll, session.rules, session.wagers, session.side_bet_wagers)
+        save_game(session)
         # A single-hand round's own blackjack already got its highlight
         # sound (sidebet-normal-win.wav) the moment its BLACKJACK banner
         # showed -- see announce_new_settlement_sounds. Playing wager-win.wav
@@ -2065,19 +2064,22 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
     except curses.error:
         pass
 
-    bankroll, rules, wagers, side_bet_wagers = persist.load_state()
+    rules, wagers, side_bet_wagers = persist.load_state()
     history = HistoryDB.open(db_path)
     # Lifetime stats an older version kept in the state file move into the
     # database (once); until they have, they stay in the state file untouched.
     history.import_pending_legacy_stats()
-    session = GameSession(bankroll, rules, wagers, side_bet_wagers, history=history)
+    # The bankroll is the casino bank's (the first time, it's carried over
+    # from the state file -- which needs the lifetime P/L just imported).
+    bank = open_bank(history)
+    session = GameSession(bank.balance, rules, wagers, side_bet_wagers, history=history, bank=bank)
     session.ensure_shoe_ready()  # validate the session's very first shoe (silently -- nothing to blink about yet)
 
     round_: Optional[Round] = None
     buffer = ""
-    message = persist.take_load_warning() or (
+    message = persist.take_load_warning() or bank.warning or (
         f"History database unavailable -- this session won't be logged ({history.error})" if history.error else ""
-    )
+    ) or (f"Bank file couldn't be saved ({bank.error})" if bank.error else "")
     # Tracks how long the current "New shoe shuffled in..." style message
     # (there are several call sites for this, see NEW_SHOE_MESSAGE_PREFIXES
     # below) has been showing -- self-resets whenever `message` becomes
@@ -2537,8 +2539,18 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
         # record_round is a no-op for a round it already logged.
         if round_ is not None:
             history.record_round(session, round_)
-        persist.save_state(session.bankroll, session.rules, session.wagers, session.side_bet_wagers)
+        save_game(session)
         history.close(session)
+
+
+def save_game(session: GameSession) -> None:
+    """Save the game: tell the casino bank what the table won or lost, then
+    write the state file. While the bank's file can't be written, the state
+    file carries the bankroll too, so it can't be lost."""
+    session.sync_bank()
+    if session.bank is not None:
+        persist.set_legacy_bankroll(None if session.bank.on_disk else session.bankroll)
+    persist.save_state(session.rules, session.wagers, session.side_bet_wagers)
 
 
 def _exit_on_signal(signum, _frame) -> None:

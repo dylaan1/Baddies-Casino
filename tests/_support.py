@@ -30,8 +30,9 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(TESTS))
 
 cb = lambda name: importlib.import_module("blackjack." + name)
-engine, rules_m, cards, history, persist, commands, stats_m, ui = (
-    cb(n) for n in ("engine", "rules", "cards", "history", "persist", "commands", "stats", "ui"))
+engine, rules_m, cards, history, persist, commands, stats_m, ui, bjbank = (
+    cb(n) for n in ("engine", "rules", "cards", "history", "persist", "commands", "stats", "ui", "bank"))
+casino_bank = importlib.import_module("casino.bank")
 Phase = engine.Phase
 FULL = [cards.Card(r, s) for r in cards.RANKS for s in cards.SUITS]
 hilo = cards.hilo_value
@@ -63,11 +64,20 @@ class Checker:
 
 
 def reset_data():
-    """Wipe the isolated data folder and state file so a test starts from a clean install."""
+    """Wipe the isolated data folders (blackjack's and the casino bank's) and state file so a test starts from a
+    clean install."""
     shutil.rmtree(history.DATA_DIR, ignore_errors=True)
+    shutil.rmtree(casino_bank.CASINO_DIR, ignore_errors=True)
     for f in Path(HOME).glob(".cs-blackjack_state.json*"):
         f.unlink()
     persist.set_legacy_stats(None)
+    persist.set_legacy_bankroll(None)
+
+
+def game_session(rules, wagers, sbw, hist):
+    """A GameSession opened the way the game opens one (ui._main): its bankroll is the casino bank's."""
+    bank = bjbank.open_bank(hist)
+    return engine.GameSession(bank.balance, rules, wagers, sbw, history=hist, bank=bank)
 
 
 # ---------------------------------------------------------------- cards

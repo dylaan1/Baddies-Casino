@@ -23,6 +23,9 @@ MUTATIONS = {   # name: (check script that must catch it, what is broken)
     "import_sign": ("check_stats_and_import.py", "the legacy import clamps negative money figures (a losing side bet) to zero"),
     "drop_rounds": ("check_locked_db.py", "rounds queued behind a locked database are discarded when a write fails"),
     "drop_shoes": ("check_locked_db.py", "shoe changes queued behind a locked database are discarded when a write fails"),
+    "bank_reread": ("check_casino.py", "the bank writes its own copy without re-reading the file, undoing another program's change"),
+    "bank_unsaved": ("check_casino.py", "a bank change whose write failed is forgotten by the next write"),
+    "bank_split": ("check_audit.py", "blackjack's results reach the bank as deposits instead of as its winnings"),
 }
 
 
@@ -101,6 +104,21 @@ def apply(which):
                 self._pending_shoe_ops.clear()
             return True
         history.HistoryDB._flush_shoe_ops = bad
+    elif which in ("bank_reread", "bank_unsaved"):
+        def bad(self, change):
+            with self._locked():
+                if which == "bank_unsaved" and self.path.exists():
+                    self._read_or_set_aside()      # re-reads, but doesn't put the unwritten changes back on
+                change()
+                return self._write()
+        S.casino_bank.Bank._update = bad
+    elif which == "bank_split":
+        def bad(self):
+            won = self.bankroll - self._bank_synced
+            if self.bank is not None and won:
+                self.bank.transfer(won, "blackjack")
+            self._bank_synced = self.bankroll
+        engine.GameSession.sync_bank = bad
     else:
         raise SystemExit(f"unknown mutation {which!r}")
 
