@@ -252,11 +252,11 @@ match, no restart needed.
 
   | Hand | Pays |
   |---|---|
-  | Royal Flush | 50:1 |
+  | Royal Flush | 100:1 |
   | Straight Flush | 40:1 |
-  | Trips | 25:1 |
+  | Trips | 30:1 |
   | Straight | 10:1 |
-  | Flush | 3:1 |
+  | Flush | 5:1 |
 
   Requires **3+ decks** in the live shoe — firmly disabled below that (the
   odds swing too far in the player's favor with fewer decks in play).
@@ -266,15 +266,15 @@ match, no restart needed.
 
   | Hand | Payout (Standard) | Payout (Double Deck) |
   |---|---|---|
-  | Suited 7-7-7♦ | 5000:1 | –– |
+  | Suited 7-7-7♦ | 2000:1 | –– |
   | Suited 7-7-7 | 500:1 | –– |
-  | Suited 6-7-8 | 100:1 | 500:1 |
+  | Suited 6-7-8 | 100:1 | 100:1 |
   | Unsuited 7-7-7 | 50:1 | –– |
-  | Suited 21 | 30:1 | 50:1 |
-  | Unsuited 6-7-8 | 20:1 | 40:1 |
-  | Unsuited 21 | 8:1 | 10:1 |
-  | Any 20 | 4:1 | 4:1 |
-  | Any 19 | 3:1 | 3:1 |
+  | Unsuited 6-7-8 | 30:1 | 30:1 |
+  | Suited 21 | 25:1 | 25:1 |
+  | Unsuited 21 | 4:1 | 4:1 |
+  | Any 20 | 3:1 | 3:1 |
+  | Any 19 | 2:1 | 2:1 |
 
 - **Dealer Buster** — pays out when the dealer busts, scaled by how many
   cards it took. No deck-count restriction, but an 8+ card bust pays out
@@ -283,11 +283,11 @@ match, no restart needed.
   | # of Cards | Payout (2+ decks) | Payout (Single Deck) |
   |---|---|---|
   | 8+ | 250:1 | **500:1** |
-  | 7 | 100:1 | 100:1 |
-  | 6 | 50:1 | 50:1 |
-  | 5 | 12:1 | 12:1 |
+  | 7 | 50:1 | 50:1 |
+  | 6 | 12:1 | 12:1 |
+  | 5 | 4:1 | 4:1 |
   | 4 | 3:1 | 3:1 |
-  | 3 | 2:1 | 2:1 |
+  | 3 | 3:2 | 3:2 |
 
   Whenever a shoe is cut (session start, `newshoe`, or the automatic
   post-round reshuffle) that no longer supports an enabled Power Poker or
