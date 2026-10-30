@@ -1,7 +1,9 @@
 """The real game, in a pseudo-terminal: deck-size rules and their messages, no hand lock, a genuine mid-hand
-reshuffle on screen, and the data written when the game is quit or killed. Needs `pyte` (pip install pyte);
-skipped without it. Takes about a minute -- it types at human speed so the curses screen keeps up."""
+reshuffle on screen, and the data written when the game is quit or killed (the casino bank included). Needs
+`pyte` (pip install pyte); skipped without it. Takes about a minute -- it types at human speed so the curses
+screen keeps up."""
 import importlib.util
+import json
 import os
 import signal
 import sqlite3
@@ -29,6 +31,11 @@ def db(home):
     c = sqlite3.connect(os.path.join(home, ".cs-blackjack", "blackjack.db"))
     c.row_factory = sqlite3.Row
     return c
+
+
+def bank_file(home):
+    with open(os.path.join(home, ".baddies-casino", "bank.json")) as fh:
+        return json.load(fh)
 
 
 def quit_game(g):
@@ -172,6 +179,8 @@ for label, sig in (("SIGTERM (kill)", signal.SIGTERM), ("SIGHUP (terminal window
     check(len(dealt + tail) == 2 * 312, f"{label}: dealt + never-dealt account for all 312 cards")
     check(c.execute("select count(*) from sessions where ended_at is null").fetchone()[0] == 0, f"{label}: the session was closed")
     check(c.execute("select count(*) from hands").fetchone()[0] >= 1, f"{label}: the rounds played were kept")
+    table_pl = c.execute("select sum(total_pl) from hands").fetchone()[0]
+    check(abs(bank_file(home)["balance"] - (10_000 + table_pl)) < 1e-6, f"{label}: the casino bank was told about every round ({table_pl:+.2f})")
     c.close()
 
 # =============================================================== D. --db starts from a clean slate

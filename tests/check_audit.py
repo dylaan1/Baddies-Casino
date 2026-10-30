@@ -97,10 +97,10 @@ def wagers(session, rng):
 def run(n_rounds, seed):
     rng = random.Random(seed)
     random.seed(seed)
-    bankroll, rules, wg, sbw = persist.load_state()
+    rules, wg, sbw = persist.load_state()
     hist = history.HistoryDB.open()
     assert hist.error is None, hist.error
-    s = engine.GameSession(bankroll, rules, wg, sbw, history=hist)
+    s = S.game_session(rules, wg, sbw, hist)
     s.ensure_shoe_ready()
     resets = Counter()
     rounds = 0
@@ -111,7 +111,7 @@ def run(n_rounds, seed):
         if i % 5 == 0:
             wagers(s, rng)
         if s.bankroll < 5000:
-            s.adjust_bankroll(30000)
+            s.deposit(30000, "audit top-up")
         if rng.random() < 0.06:                              # a very deep shoe: leave only a few cards
             keep = rng.randint(4, 30)
             while s.shoe.cards_remaining > keep:
@@ -139,7 +139,7 @@ def run(n_rounds, seed):
                 else:
                     assert abs(v - inc[k]) < 1e-6, f"lifetime cache drifted on {k} at round {rounds}"
         s.ensure_shoe_ready()
-        persist.save_state(s.bankroll, s.rules, s.wagers, s.side_bet_wagers)
+        S.ui.save_game(s)
     PRE["stats"] = hist.load_stats()
     PRE["oracle"] = copy.deepcopy(ORACLE)
     PRE["rounds"] = rounds
@@ -151,6 +151,7 @@ def run(n_rounds, seed):
     hist.record_round(s, r)
     quit_bankroll = s.bankroll
     STATS_AT_END[hist.session_id] = None
+    S.ui.save_game(s)                                        # what quitting does (ui._main's cleanup)
     hist.close(s)
     return s, resets, rounds, r, quit_bankroll
 
@@ -190,6 +191,16 @@ if __name__ == "__main__":
     last = q("select * from hands where round_id = (select max(round_id) from hands)")
     check(len(last) == len(cut_round.spots) and abs((quit_bankroll - last[0]["bankroll_before"]) - sum(r["total_pl"] for r in last)) < 1e-6,
           "cut-off round P/L != real bankroll change")
+
+    # 2b. the casino bank heard about every dollar won or lost at the table -- the cut-off round's forfeited
+    #     wager included -- as blackjack's winnings, and about the top-ups only as deposits
+    bank = S.casino_bank.Bank.open()
+    table_pl = q("select sum(total_pl) t from hands")[0]["t"]
+    check(abs(bank.game_winnings.get("blackjack", 0.0) - table_pl) < 1e-6,
+          f"bank's blackjack winnings {bank.game_winnings.get('blackjack')} != the table's P/L {table_pl}")
+    check(abs(bank.balance - quit_bankroll) < 1e-6, f"bank balance {bank.balance} != the bankroll at quit {quit_bankroll}")
+    check(abs(bank.deposited - bank.withdrawn - (quit_bankroll - table_pl)) < 1e-6 and bank.withdrawn == 0,
+          "the bank's deposits are the opening deposit plus the top-ups, nothing else")
 
     # 3. every shoe row against the cards the engine ACTUALLY dealt (a mid-round reshuffle is its own logical shoe)
     db_shoes = q("select * from shoes order by shoe_id")

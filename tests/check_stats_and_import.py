@@ -31,10 +31,10 @@ LEGACY = {
 
 
 def open_game(hist=None):
-    bankroll, rules, wagers, sbw = persist.load_state()
+    rules, wagers, sbw = persist.load_state()
     hist = hist or history.HistoryDB.open()
     hist.import_pending_legacy_stats()
-    s = engine.GameSession(bankroll, rules, wagers, sbw, history=hist)
+    s = S.game_session(rules, wagers, sbw, hist)
     s.ensure_shoe_ready()
     return s, hist
 
@@ -90,7 +90,7 @@ check(st.hands_this_session == 0 and st.session_main_pl == 0, "the imported numb
 check(abs(st.ev_percent() - (-750 / 25000 * 100)) < 1e-9, f"EV% works from the imported baseline ({st.ev_percent():.2f}%)")
 rows = hist.conn.execute("select count(*) from imported_stats").fetchone()[0]
 check(rows > 0, f"the baseline is stored in the database (imported_stats: {rows} rows), where MySQL can see it")
-persist.save_state(s.bankroll, s.rules, s.wagers, s.side_bet_wagers)
+persist.save_state(s.rules, s.wagers, s.side_bet_wagers)
 check("stats" not in json.loads(persist.STATE_PATH.read_text()), "...and the next save drops it from the state file")
 check(abs(st.lifetime_power_poker_pl - 100) < 1e-9 and st.lifetime_main_pl < 0, "(a NEGATIVE imported figure keeps its sign: main P/L -750 is not clamped to zero)")
 
@@ -173,10 +173,10 @@ hist.close(s)
 # ------------------------------------------------------------------ an import that can't happen leaves the block untouched
 S.reset_data()
 Path(persist.STATE_PATH).write_text(json.dumps(LEGACY))
-bankroll, rules, w, sb = persist.load_state()
+rules, w, sb = persist.load_state()
 dead = history.HistoryDB.open(Path(HOME) / "nope-file" / "x.db") if (Path(HOME) / "nope-file").write_text("x") else None
 check(dead.import_pending_legacy_stats() is False and persist.pending_legacy_stats() is not None, "with no usable database the import reports False and keeps the block for later")
-persist.save_state(bankroll, rules, w, sb)
+persist.save_state(rules, w, sb)
 check(json.loads(persist.STATE_PATH.read_text()).get("stats", {}).get("hands_lifetime") == 1000, "...and the state file keeps the old stats safe meanwhile")
 s, hist = open_game()
 check(s.stats.hands_lifetime == 1000, "the next launch with a working database imports them")
@@ -212,6 +212,10 @@ check(s.pending_confirmation == "bank_reset" and s.bankroll == bank, "'bank rese
 s.pending_confirmation = None
 s.reset_bankroll()
 check(s.bankroll == s.rules.default_bankroll and s.stats.hands_lifetime == lifetime_before + s.stats.hands_this_session, "resetting the bankroll changes the bankroll and nothing else")
+last = S.casino_bank.Bank.open().transactions[-1]
+check(last["note"] == "Blackjack: bank reset" and abs(last["amount"] - (s.rules.default_bankroll - bank)) < 1e-9
+      and abs(last["balance"] - s.rules.default_bankroll) < 1e-9,
+      f"...which the casino bank records as a deposit/withdrawal of the difference, not as blackjack winnings: {last}")
 msg = commands.handle_command("hardreset", s)
 check(msg.startswith("Unknown command: 'hardreset'"), f"'hardreset' no longer exists: {msg}")
 check(not any("hardreset" in line for line in commands.HELP_LINES), "...and is out of the help text")
@@ -220,12 +224,13 @@ hist.close(s)
 # a new database file is the way to start from a clean slate: nothing carries over
 fresh_path = Path(HOME) / "fresh-slate.db"
 hist_new = history.HistoryDB.open(fresh_path)
-bankroll, rules, w, sb = persist.load_state()
+rules, w, sb = persist.load_state()
 persist.set_legacy_stats(None)
-s_new = engine.GameSession(bankroll, rules, w, sb, history=hist_new)
+s_new = S.game_session(rules, w, sb, hist_new)
 s_new.ensure_shoe_ready()
 check(s_new.stats.hands_lifetime == 0 and s_new.stats.lifetime_main_pl == 0 and s_new.stats.sessions_played == 1, "a brand-new database file shows lifetime zero, while the old database is untouched")
 check(hist.path != hist_new.path and history.HistoryDB.open().conn.execute("select count(*) from hands").fetchone()[0] > 0, "...the original file still holds all its hands")
+check(s_new.bankroll == s.bankroll, "...and the bankroll is still the casino bank's: a fresh history doesn't touch the money")
 hist_new.close(s_new)
 
 # ------------------------------------------------------------------ shoes played: quarter shoes, from 0

@@ -68,7 +68,7 @@ HELP_LINES = [
     "  export mysql                   Write the whole history database as a MySQL .sql script",
     "  backup                         Snapshot the history database + saved game state",
     "  backups                        List saved backups",
-    "  restore <name>                 Replace ALL current data with a backup (type 'confirm')",
+    "  restore <name>                 Replace ALL blackjack data with a backup (type 'confirm'; the bank is kept)",
     "",
     "REFERENCE",
     "  betspread                      Show the $10/$25/$100 bet spread reference tables",
@@ -283,7 +283,7 @@ def _dispatch(
     if head == "bank":
         if rest and rest[0] == "add":
             amt = _parse_float(_require(rest, 1, "bank add N"), "bank add")
-            session.adjust_bankroll(amt)
+            session.deposit(amt, "Blackjack: bank add")
             return f"Bankroll +${amt:,.2f} -> ${session.bankroll:,.2f}"
         if rest and rest[0] == "default":
             amt = _parse_float(_require(rest, 1, "bank default N"), "bank default")
@@ -297,7 +297,7 @@ def _dispatch(
         amt = _parse_float(_require(rest, 0, "bank N"), "bank")
         if amt < 0:
             raise CommandError("bankroll cannot be negative")
-        session.set_bankroll(amt)
+        session.set_bankroll(amt, f"Blackjack: bank {amt:g}")
         return f"Bankroll set to ${amt:,.2f}"
 
     if head == "hands":
@@ -342,8 +342,9 @@ def _dispatch(
         name = history.find_backup(_require(rest, 0, "restore <backup name>  (see 'backups')"))
         session.pending_restore = name
         return (
-            f"Type 'confirm' to replace ALL current data (history, bankroll, rules, stats) with backup '{name}'. "
-            "A safety backup of the current data is taken first (anything else cancels)."
+            f"Type 'confirm' to replace ALL blackjack data (history, rules, stats) with backup '{name}' -- "
+            "your casino bank balance stays as it is. A safety backup of the current data is taken first "
+            "(anything else cancels)."
         )
 
     if head in ("help", "?"):

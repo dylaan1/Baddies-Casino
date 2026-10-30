@@ -1288,11 +1288,24 @@ class HistoryDB:
 
     @_guarded()
     def overview(self) -> Dict[str, Any]:
-        """Numbers for the stats screen: this session and all time (bankroll
-        range, drawdown, streaks, best/worst hand), row counts, and results
-        by hand type."""
+        """Numbers for the stats screen: this session and all time (max
+        drawdown, streaks, best/worst hand), row counts, and results by hand
+        type."""
         c = self.conn
         counts = {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in EXPORT_TABLES}
+
+        def lowest_pl(where: str, params: tuple) -> float:
+            """Max drawdown: the lowest the running P/L (main wagers and side
+            bets, round by round) has ever been, starting from $0 at the first
+            hand counted -- 0.0 if it never went below. Abandoned hands count:
+            their forfeited wager really left the bankroll."""
+            running = lowest = 0.0
+            for (round_pl,) in c.execute(
+                f"SELECT SUM(total_pl) FROM hands {where} GROUP BY round_id ORDER BY MIN(hand_id)", params
+            ):
+                running += round_pl
+                lowest = min(lowest, running)
+            return lowest
 
         def hand_extremes(where: str, params: tuple) -> Dict[str, float]:
             row = c.execute(
@@ -1305,18 +1318,18 @@ class HistoryDB:
             row = c.execute("SELECT * FROM sessions WHERE session_id = ?", (self.session_id,)).fetchone()
             session = dict(row)
             session.update(hand_extremes("AND session_id = ?", (self.session_id,)))
+            # (the sessions row's own max_drawdown column is the largest
+            # peak-to-trough fall; the stats screen shows the lowest point)
+            session["max_drawdown"] = lowest_pl("WHERE session_id = ?", (self.session_id,))
 
         row = c.execute(
-            """SELECT MAX(peak_bankroll), MIN(lowest_bankroll), MAX(max_drawdown),
-                      MAX(longest_win_streak), MAX(longest_loss_streak), MAX(longest_push_streak) FROM sessions"""
+            "SELECT MAX(longest_win_streak), MAX(longest_loss_streak), MAX(longest_push_streak) FROM sessions"
         ).fetchone()
         all_time: Dict[str, Any] = {
-            "peak_bankroll": row[0],
-            "lowest_bankroll": row[1],
-            "max_drawdown": row[2] or 0.0,
-            "longest_win_streak": row[3] or 0,
-            "longest_loss_streak": row[4] or 0,
-            "longest_push_streak": row[5] or 0,
+            "max_drawdown": lowest_pl("", ()),
+            "longest_win_streak": row[0] or 0,
+            "longest_loss_streak": row[1] or 0,
+            "longest_push_streak": row[2] or 0,
         }
         all_time.update(hand_extremes("", ()))
 
@@ -1444,7 +1457,7 @@ class HistoryDB:
         try:
             dest.mkdir(parents=True)
             if session is not None:
-                persist.save_state(session.bankroll, session.rules, session.wagers, session.side_bet_wagers)
+                persist.save_state(session.rules, session.wagers, session.side_bet_wagers)
             dst = sqlite3.connect(dest / DB_NAME)
             try:
                 self.conn.backup(dst)
@@ -1490,7 +1503,9 @@ class HistoryDB:
 
     def restore(self, session: "GameSession", name: str) -> persist.State:
         """Replace the database and the saved-state file with a backup's and
-        return the backup's parsed state for the caller to load. A safety
+        return the backup's parsed state for the caller to load. (The casino
+        bank isn't blackjack's to restore: a bankroll an older backup's state
+        file still carries is never read back.) A safety
         backup of the current data is taken first, and the backup is fully
         validated before anything is touched. The caller starts a new
         session/shoe afterward -- the old ids mean nothing in the new
@@ -1537,4 +1552,5 @@ class HistoryDB:
         # lifetime numbers in its state file; the same one-time import applies.
         persist.set_legacy_stats(persist.read_legacy_stats(persist.STATE_PATH))
         self.import_pending_legacy_stats()
+        persist.clear_legacy_bankroll()
         return state

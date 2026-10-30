@@ -12,10 +12,10 @@ S.reset_data()
 
 
 def new_session(decks=6):
-    bankroll, rules, wagers, sbw = persist.load_state()
+    rules, wagers, sbw = persist.load_state()
     rules.num_decks = decks
     hist = history.HistoryDB.open()
-    s = engine.GameSession(bankroll, rules, wagers, sbw, history=hist)
+    s = S.game_session(rules, wagers, sbw, hist)
     s.ensure_shoe_ready()
     hist.conn.execute("PRAGMA busy_timeout = 60")     # don't wait the full two seconds on every blocked write
     return s, hist
