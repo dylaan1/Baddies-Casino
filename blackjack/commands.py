@@ -15,7 +15,7 @@ from .rules import (
     SINGLE_DECK_MIN_CARDS,
     min_cards_to_deal,
 )
-from .sidebets import side_bet_allowed
+from .sidebets import format_odds, side_bet_allowed
 
 if TYPE_CHECKING:  # pragma: no cover
     from .engine import GameSession
@@ -508,4 +508,4 @@ def _sidebet_payout_command(head: str, rest: List[str], session: "GameSession") 
         raise CommandError(f"Unknown {label} category '{category_key}'. Valid categories: {', '.join(valid)}")
     for tk in touched:
         session.rules.payouts[tk][category_key] = payout
-    return f"{label} '{category_key}' now pays {payout:g}:1"
+    return f"{label} '{category_key}' now pays {format_odds(payout)}"

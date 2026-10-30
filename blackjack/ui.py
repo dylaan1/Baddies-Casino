@@ -39,6 +39,7 @@ from .sidebets import (
     STAR21_STANDARD_CATEGORIES,
     buster_table_key,
     categories_for_table,
+    format_odds,
     side_bet_allowed,
     star21_table_key,
 )
@@ -119,7 +120,7 @@ def payout_tables_for(
 
     def rows_for(table_key: str) -> List[Tuple[str, str]]:
         table = payouts[table_key]
-        return [(_fold_diamonds(label), f"{table[key]:g}:1") for key, label in categories_for_table(table_key)]
+        return [(_fold_diamonds(label), format_odds(table[key])) for key, label in categories_for_table(table_key)]
 
     return [
         ("Power Poker", rows_for("power_poker")),
@@ -699,7 +700,7 @@ def sidebet_stats_tables(
             for key, label in categories_for_table(table_key)
         ]
         raw.sort(key=lambda row: row[1])
-        rows = [(name, f"{payout:g}:1", str(dealt), str(won)) for name, payout, dealt, won in raw]
+        rows = [(name, format_odds(payout), str(dealt), str(won)) for name, payout, dealt, won in raw]
         tables.append((title, rows))
     return tables
 
