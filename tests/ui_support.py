@@ -31,7 +31,7 @@ class Game:
             fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
             env = {"HOME": home, "TERM": "xterm-256color", "PATH": "/nonexistent",   # no audio player on PATH: stays silent
                    "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}
-            argv = cmd or [sys.executable, "-m", "cs-blackjack", *args]
+            argv = cmd or [sys.executable, "-m", "blackjack", *args]
             os.execve(argv[0], argv, env)
         self.pid, self.fd = pid, fd
         self.exit_status = None

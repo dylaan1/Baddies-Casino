@@ -137,7 +137,7 @@ foreign.mkdir()
 shutil.copy(bad / "other.db", foreign / "blackjack.db")
 (foreign / "state.json").write_text(persist.STATE_PATH.read_text())
 err = s.restore_backup("20200104-000000-foreign")
-check(err is not None and "isn't a cs-blackjack history database" in err, f"some other SQLite file is rejected: {err}")
+check(err is not None and "isn't a Blackjack history database" in err, f"some other SQLite file is rejected: {err}")
 check(s.history.session_id is not None and n_rows(s.history) == before, "the session is still live and the data intact after every rejected restore")
 play(s, 3, seed=11)
 

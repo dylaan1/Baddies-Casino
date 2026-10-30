@@ -55,7 +55,7 @@ _add("ui", "check_ui.py")
 
 class Tools(unittest.TestCase):
     """Smoke runs of the analysis tools on small samples: they must run, and a crash (a shoe running dry with no
-    failsafe) is a failure. The full-size runs are described in CS-BLACKJACK.md."""
+    failsafe) is a failure. The full-size runs are described in BLACKJACK.md."""
 
     def tool(self, *args, env=None):
         res = run(str(Path("tools") / args[0]), *args[1:], env=env)
