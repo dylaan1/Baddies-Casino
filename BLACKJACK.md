@@ -1,5 +1,45 @@
 # Baddie's Casino™
 
+## The Casino Floor
+
+Baddie's Casino opens onto the **casino floor**, a full-screen `curses` title
+screen that every game is launched from:
+
+```bash
+python3 -m casino
+```
+
+Across the top runs the **BADDIE'S CASINO** sign in big lime-green block
+letters: BADDIE'S over CASINO, or on one line in a window over 320 columns
+wide, and smaller in a smaller window. Below it is a purple **Luxury Gaming
+and Amenities** banner with 3 inches clear on either side. Under them sit two
+menus side by side. Each runs from an inch in from its side of the screen
+toward the middle, and down to where the bottom 15% of the screen begins:
+
+- **Games** — every game in the casino (**Classic Blackjack**, for now).
+  Picking one launches it exactly as `python3 -m blackjack` does, and quitting
+  the game brings you back to the floor.
+- **Bank** — **Account Summary** (your balance, what each game has won, and
+  your total deposits and withdrawals), **Deposit**, **Withdraw** (up to your
+  balance), and **Transactions** (every deposit and withdrawal, newest first).
+
+The bottom of the screen holds your balance, the keys, and, on the last
+line, the intellectual-property notice (wrapped onto more lines only if the
+window is too narrow for it). A terminal can't measure inches, so the floor
+converts them to columns with `COLUMNS_PER_INCH` in `casino/floor.py`: 21,
+for Monaco 10 pt on a 13-inch MacBook Pro at its default scaling. Change it
+if you use a different font size or display scaling.
+
+| Key / mouse | Does |
+|---|---|
+| ↑ / ↓ (also PgUp/PgDn, Home/End) | Move through a menu. The highlight stops at the first and last option, and a longer menu scrolls to keep it in view |
+| ← / → or Tab / Shift-Tab | Switch between the Games and Bank menus |
+| Enter (or Space) | Pick the highlighted option |
+| Click an option | Highlight it; click it again to pick it |
+| Click anywhere off the menus (or Esc) | Clear the highlight. Any arrow key, or a click on an option, brings it back |
+| Scroll wheel over a menu | Move its highlight |
+| `q`, or click **Leave Casino** | Leave the casino |
+
 ## The Bank
 
 Every game plays from one bankroll, held by the casino bank in
@@ -10,17 +50,17 @@ its date, amount, and the balance after it). Both go into the balance:
 
     balance = deposited − withdrawn + what the games have won
 
-Money moves in and out with blackjack's `bank` commands (`bank add N`,
-`bank N`, `bank reset`), each recorded as a deposit or withdrawal. A game
-reports its results to the bank every time it saves (after every round, and
-on quit).
+Money moves in and out from the floor's Bank menu, or from inside blackjack
+with its `bank` commands (`bank add N`, `bank N`, `bank reset`), each
+recorded as a deposit or withdrawal. A game reports its results to the bank
+every time it saves (after every round, and on quit).
 
 Every change is written to the bank file straight away (atomically, under a
 lock), so two programs sharing it, such as the same game open in two
 terminals, never undo each other's updates. A change that couldn't be
 written (a full disk, say) is held and goes in with the next write that
 works. A bank file that can't be read is set aside as
-`bank.json.corrupt-<timestamp>`, never overwritten, and the game says so.
+`bank.json.corrupt-<timestamp>`, never overwritten, and the casino says so.
 
 **The first launch after upgrading** carries the bankroll blackjack used to
 keep in `~/.cs-blackjack_state.json` into the bank. Your lifetime blackjack
@@ -554,7 +594,8 @@ Run it as a module from the repository root:
 python3 -m blackjack
 ```
 
-The game maximizes your terminal window on launch. Your wagers and
+or pick it from the casino floor (`python3 -m casino`, see **The Casino
+Floor**). The game maximizes your terminal window on launch. Your wagers and
 table rules are saved to `~/.cs-blackjack_state.json` and reloaded
 automatically the next time you launch; your bankroll is the casino bank's
 (see **The Bank**). (Your data keeps the game's earlier
@@ -716,6 +757,7 @@ table, so there's no separate command to look them up.
 
 | File | Responsibility |
 |---|---|
+| `../casino/floor.py` | The casino floor (`python3 -m casino`, via `../casino/__main__.py`): the sign, the Games and Bank menus, launching a game |
 | `../casino/bank.py` | The casino bank: the shared bankroll in `~/.baddies-casino/bank.json` (atomic, locked writes; deposits, withdrawals, and winnings per game) |
 | `bank.py` | Blackjack's link to the casino bank: opening it, and carrying blackjack's old bankroll into it the first time |
 | `cards.py` | `Card`, `Shoe` (shuffling, drawing, Hi-Lo running/true count) |
@@ -753,11 +795,11 @@ CSBJ_FULL=1 python3 -m unittest discover -s tests   # also the mutation check an
 | `check_split_cap.py` | One split per hand on a single deck, and only there |
 | `check_history_reshuffle.py` | How the log records a round that ran the shoe dry (start shoe, the `reshuffled_mid_round` flag, the exact cards of both shoes), and upgrades of older database versions |
 | `check_stats_and_import.py` | Every lifetime and session figure comes from the database; the one-time import of an older game's stats (including negative figures); `newsession`, `bank reset`, and `--db` |
-| `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, and blackjack's bank commands and results landing in the right column |
+| `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, blackjack's bank commands and results landing in the right column, and the floor's menus, focus, clicks, and bank options |
 | `check_data_safety.py` | `export`, `backup`, `restore` (and rejecting bad backups), crash recovery, corrupt or newer files, atomic saves, and playing on with no database |
 | `check_locked_db.py` | Another program holding the database: nothing is dropped or mis-attributed, and it all lands, in order, once the lock lifts |
 | `check_audit.py` | Thousands of random rounds with the log attached, checked against ground truth: bankroll conservation, the casino bank getting exactly the table's P/L, the exact cards dealt, every stat against an independent implementation, the running counts |
-| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP` (the casino bank included). Needs `pip install pyte`; skipped without it |
+| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, and the casino floor by keyboard and mouse (blackjack launched from it, the bank options). Needs `pip install pyte`; skipped without it |
 | `tools/mutation_check.py` | Injects known bugs and confirms the checks above fail for each — a check that can't fail proves nothing |
 | `tools/consumption.py`, `tools/montecarlo.py`, `tools/adversary.py` | The measurements behind the minimum-cards floors: cards used per round, crash / failsafe rates per configuration over millions of rounds, and a search over every legal line of play (run them directly; `--help`-style usage is in each file's docstring) |
 

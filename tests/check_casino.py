@@ -1,11 +1,16 @@
-"""The casino bank (casino/bank.py).
+"""The casino bank (casino/bank.py) and the casino floor's menus (casino/floor.py), apart from the screen.
 
-Its balance is always deposits - withdrawals + game winnings; every change is on disk at once and
+The bank: its balance is always deposits - withdrawals + game winnings; every change is on disk at once and
 never undoes another program's; a change that couldn't be written goes in with the next write; a corrupt file
 is set aside, never overwritten. Blackjack's old bankroll moves in exactly once, split into what was deposited
 and what blackjack won, and is never lost if the bank can't be created; blackjack's bank commands land as
-deposits/withdrawals and its table results as winnings."""
+deposits/withdrawals and its table results as winnings. The floor: where everything goes (the sign, the
+banner, the menus' inch margins, the clear bottom 15%, the notice on the last line), menus stop at their ends and
+scroll, focus moves between them, clicking off clears the highlight, and the bank options move money within the
+limits."""
+import importlib
 import json
+import math
 import os
 import random
 from pathlib import Path
@@ -15,6 +20,8 @@ import _support as S
 
 check = S.Checker()
 bank_m = S.casino_bank
+floor_m = importlib.import_module("casino.floor")
+curses = floor_m.curses
 BANK = bank_m.BANK_PATH
 
 
@@ -139,8 +146,8 @@ hist.close(s)
 
 S.reset_data()
 persist.STATE_PATH.write_text(json.dumps({"bankroll": 777.0, "rules": {}, "stats": {"hands_lifetime": 5, "lifetime_main_pl": 77.0}}))
-b = bank_m.Bank.open(opening=S.bjbank.opening)                          # another program sharing the bank, before blackjack has run
-check(abs(b.balance - 777) < 1e-9 and abs(b.game_winnings["blackjack"] - 77) < 1e-9, "another program opening the bank first carries the bankroll over the same way")
+b = bank_m.Bank.open(opening=S.bjbank.opening)                          # the casino floor, before blackjack has run
+check(abs(b.balance - 777) < 1e-9 and abs(b.game_winnings["blackjack"] - 77) < 1e-9, "the casino floor, opened first, carries the bankroll over the same way")
 s, hist = launch()
 check(abs(s.bankroll - 777) < 1e-9 and len(s.bank.transactions) == 1, "...and blackjack then uses that bank as it is")
 hist.close(s)
@@ -179,5 +186,81 @@ check(notes == ["Blackjack: bank add", "Blackjack: bank 5000", "Blackjack: bank 
 check(abs(b.transactions[2]["balance"] - 5000) < 1e-9 and abs(b.transactions[3]["balance"] - s.rules.default_bankroll) < 1e-9,
       "...each noting the bankroll it left behind")
 hist.close(s)
+
+# =============================================================== H. the floor's menus
+v = floor_m.Viewport(10, 4)
+v.move(-1)
+check(v.cursor == 0 and v.top == 0, "Up on the first option stays on it")
+for _ in range(12):
+    v.move(1)
+check(v.cursor == 9 and v.top == 6 and v.more_above and not v.more_below, f"Down stops on the last option, the view scrolled to keep it in sight (top {v.top})")
+v.page(-1)
+check(v.cursor == 5 and v.top == 5 and list(v.visible) == [5, 6, 7, 8], "Page Up moves a page and the view follows")
+v.home()
+check(v.cursor == 0 and v.top == 0 and v.more_below, "Home goes back to the top")
+
+check(floor_m.GAMES[0].name == "Classic Blackjack" and floor_m.GAMES[0].bank_key == "blackjack", "the Games menu lists Classic Blackjack")
+inch = floor_m.COLUMNS_PER_INCH
+games = [floor_m.Game(f"Game {i}", f"g{i}", lambda: None) for i in range(40)]
+S.reset_data()
+f = floor_m.Floor(games=games)
+f.open_bank()
+H, W = 60, 238                                                         # about a maximized window on a 13-inch MacBook Pro
+lay = f.layout(H, W)
+(by, left_x), (_, right_x) = lay.boxes
+check(lay.fits and lay.sign_y == 1 and len(lay.sign) == 22 and max(len(r) for r in lay.sign) == 164,
+      "the sign: a blank row from the top, then BADDIE'S over CASINO at double size (each cell 4 columns x 2 rows)")
+check(lay.banner_y == lay.sign_y + len(lay.sign) + 1 and lay.banner_x == 3 * inch and lay.banner_x + lay.banner_w == W - 3 * inch,
+      f"a blank row, then the banner, 3 inches ({3 * inch} columns) clear on either side")
+check(by == lay.banner_y + 2 and left_x == inch and right_x + lay.box_w == W - inch and right_x - (left_x + lay.box_w) in (4, 5),
+      f"a blank row, then the menus: 1 inch ({inch} columns) in from each side, the usual gap between them")
+check(by + lay.box_h == H - math.ceil(H * 0.15) and lay.status_y == by + lay.box_h,
+      "the menus end where the bottom 15% of the screen begins, the balance just below them")
+check(lay.notice == [floor_m.NOTICE] and lay.notice_y == H - 1 and lay.footer_y == H - 2, "the notice is the bottom line, the keys just above it")
+narrow = floor_m.Floor().layout(24, 80)
+check(narrow.fits and len(narrow.notice) > 1 and narrow.notice_y + len(narrow.notice) == 24 and " ".join(narrow.notice) == floor_m.NOTICE,
+      "in a narrow window the notice wraps, whole, still ending on the bottom line")
+rows = f.menus[0].view.rows
+for _ in range(39):
+    f.key(curses.KEY_DOWN)
+check(f.menus[0].cursor == 39 and f.menus[0].view.top == 40 - rows and f.menus[0].view.more_above,
+      f"a menu longer than its box ({rows} rows) scrolls (viewport) as the highlight moves")
+check(f.key(10) == "game:39", "Enter picks the highlighted game")
+check(f.key(curses.KEY_RIGHT) is None and f.focus == 1 and f.key(curses.KEY_RIGHT) is None and f.focus == 1, "Right moves into BANK, and stops at the last menu")
+check(f.key(9) is None and f.focus == 0 and f.key(curses.KEY_BTAB) is None and f.focus == 1, "Tab and Shift-Tab go round the menus")
+f.key(27)
+check(f.focus is None and f.key(10) is None, "Esc clears the highlight, like clicking off -- and Enter then picks nothing")
+f.key(curses.KEY_DOWN)
+check(f.focus == 1 and f.menus[1].cursor == 0, "the first arrow after that brings the highlight back where it was, without moving it")
+check(f.key(ord("q")) == "quit", "q leaves the casino")
+
+(by, bx) = lay.boxes[1]
+deposit_at = (by + 2, bx + 4)
+check(f.click(*deposit_at) is None and f.focus == 1 and f.menus[1].current.action == "deposit", "a click highlights the option under it")
+check(f.click(*deposit_at) == "deposit", "...and a second click on the highlighted option picks it")
+check(f.click(0, 0) is None and f.focus is None, "a click off the menus clears the highlight")
+check(f.click(by, bx + 8) is None and f.focus == 1, "a click on a menu's border moves into that menu")
+check(f.click(lay.status_y, lay.leave_x + 2) == "quit", "a click on 'Leave Casino' leaves")
+f.wheel(lay.boxes[0][0] + 2, lay.boxes[0][1] + 4, 1)
+check(f.focus == 0 and f.menus[0].cursor == 39, "the scroll wheel over a menu moves its highlight (stopping at the end)")
+
+check(not floor_m.Floor().layout(10, 50).fits, "a window too small for the menus says so instead of drawing them")
+check(len(floor_m.fit_sign(330, 40)) == 10, "a window wide enough (320+ columns) gets the double-size sign on one line")
+for w in (238, 100, 70):
+    rows = floor_m.fit_sign(w, 40)
+    check(max(len(r) for r in rows) <= w - 4 and all(set(r) <= {floor_m.BLOCK, " "} for r in rows),
+          f"the sign fits a {w}-column window, all block characters ({len(rows)} rows)")
+check(floor_m.fit_sign(30, 40) == [floor_m.SIGN_TEXT], "...and in a tiny window it's plain text")
+
+f = floor_m.Floor()
+f.open_bank()
+check(any(label.strip() == "Classic Blackjack" for label, _ in f.summary_lines()), "the account summary lists blackjack's winnings even before it's played")
+check(f.move_money("deposit", 0).startswith("Enter an amount") and f.move_money("withdraw", 10_000.01).startswith("You can withdraw at most $10,000.00"),
+      "the floor won't move $0, or withdraw more than the balance")
+msg = f.move_money("withdraw", 2_500)
+check(msg.startswith("Withdrew $2,500.00 -- balance $7,500.00") and bank_m.Bank.open().transactions[-1]["note"] == "Casino floor", f"a withdrawal from the floor: {msg}")
+lines = f.transaction_lines()
+check(len(lines) == 2 and "Withdrawal" in lines[0] and "-$2,500.00" in lines[0] and "Opening" in lines[1], "transactions list newest first")
+check([floor_m.parse_amount(t) for t in ("1,500", "$250.50", "abc")] == [1500.0, 250.5, None], "amounts can be typed with commas or a $")
 
 check.finish("check_casino")
