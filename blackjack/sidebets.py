@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import Dict, List, Optional, Tuple
 
 from .cards import Card
@@ -78,6 +79,18 @@ def default_payouts() -> Dict[str, Dict[str, float]]:
     used both for a brand-new Rules object and to backfill any table an
     old save file's JSON doesn't have yet."""
     return {table: dict(rows) for table, rows in _DEFAULT_PAYOUTS.items()}
+
+
+def format_odds(payout: float) -> str:
+    """A payout multiplier written as table odds: a whole number as "N:1"
+    (12 -> "12:1"), anything else as the simplest fraction that matches it
+    exactly (1.5 -> "3:2", 2.5 -> "5:2", 1.2 -> "6:5"). Payouts are still
+    stored and typed as plain multipliers ('buster 3 1.5'); only how they're
+    shown changes. A value no small fraction matches keeps its decimal."""
+    odds = Fraction(payout).limit_denominator(10)
+    if abs(odds - payout) < 1e-9:
+        return f"{odds.numerator}:{odds.denominator}"
+    return f"{payout:g}:1"
 
 
 def star21_table_key(num_decks: int) -> str:

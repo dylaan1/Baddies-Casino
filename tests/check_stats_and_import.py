@@ -1,6 +1,7 @@
 """Stats come from the history database: the one-time import of an older game's lifetime numbers (a SYNTHETIC
 state file -- never anyone's real one), how the import combines with what the database already holds, the
-incremental lifetime cache against a full rescan, session vs lifetime figures, and the removed hardreset."""
+incremental lifetime cache against a full rescan, session vs lifetime figures, the removed hardreset, and side-bet
+payouts shown as table odds (1.5 -> 3:2)."""
 import json
 import math
 import random
@@ -281,5 +282,16 @@ if row["outcome"] == "abandoned":
 else:
     check(True, "(round 2 resolved on the deal -- abandoned-hand accounting exercised by check_audit instead)")
 hist.close(s)
+
+# side-bet payouts are typed as a multiplier but shown as table odds, on both payout tables and in the command reply
+odds = S.cb("sidebets").format_odds
+check([odds(v) for v in (12.0, 2000.0, 1.5, 2.5, 1.2, 0.5, 1.333)] == ["12:1", "2000:1", "3:2", "5:2", "6:5", "1:2", "1.333:1"],
+      "format_odds: whole numbers read N:1, an exact small fraction reads as that fraction, anything else keeps its decimal")
+s = S.make_session(decks=6)
+check(commands.handle_command("buster 3 1.5", s) == "Dealer Buster '3' now pays 3:2", "'buster 3 1.5' confirms the payout as 3:2")
+inline = dict(ui.payout_tables_for(s.rules.payouts, 6))["Buster"]
+check(("3 Card Bust", "3:2") in inline and ("4 Card Bust", "3:1") in inline, "the live Buster payout table shows 3:2 and 3:1")
+buster_stats = dict(ui.sidebet_stats_tables(s.rules.payouts, stats_m.Stats()))["BUSTER"]
+check(buster_stats[0][:2] == ("3 Card Bust", "3:2"), "the stats screen's Buster table shows 3:2, still sorted lowest payout first")
 
 check.finish("check_stats_and_import")

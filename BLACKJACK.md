@@ -615,6 +615,10 @@ double-deck Star 21 tables at once, so the odds stay consistent
 regardless of how the deck count changes later. Payouts persist to disk
 like everything else, so they carry over between sessions.
 
+A payout is typed as the multiplier it pays (`N` to 1), and one that isn't
+a whole number is shown as the fraction it equals: `buster 3 1.5` reads
+**3:2** on every payout table, `buster 3 2.5` reads **5:2**.
+
 **Shoe / session**
 
 | Command | Effect |
