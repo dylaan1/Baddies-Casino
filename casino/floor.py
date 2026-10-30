@@ -3,8 +3,8 @@ starts.
 
     python3 -m casino
 
-The BADDIE'S CASINO sign runs across the top in big lime-green block
-letters, over a purple "Luxury Gaming and Amenities" banner, and under them
+The BADDIE'S CASINO sign runs across the top on one line, in lime-green
+block letters one and a half times their original size, over a purple "Luxury Gaming and Amenities" banner, and under them
 sit two menus side by side: GAMES, to sit down at a game, and BANK, for the
 casino bank everything plays from (casino/bank.py) -- its summary and
 transaction list, and deposits and withdrawals. The bottom 15% of the screen
@@ -19,8 +19,9 @@ the casino. Clicking anywhere off the menus clears the highlight; an arrow key
 or a click on an option brings it back.
 
 A game runs exactly as it does on its own (python3 -m blackjack): the floor
-steps out of curses, the game takes over the terminal, and quitting the game
-comes back to the floor.
+steps out of curses and the game takes over the terminal. Every game leaves
+the same two ways: 'exit' saves and comes back to the floor (even for a game
+started on its own), and 'quit' saves and closes Baddie's Casino.
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ import sys
 import textwrap
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .bank import Bank, Opening
@@ -51,41 +53,58 @@ _FONT: Dict[str, Tuple[str, ...]] = {
     "C": (".####", "#....", "#....", "#....", ".####"),
     "N": ("#...#", "##..#", "#.#.#", "#..##", "#...#"),
     "O": (".###.", "#...#", "#...#", "#...#", ".###."),
-    " ": ("...", "...", "...", "...", "..."),
 }
 SIGN_TEXT = "BADDIE'S CASINO"
 BLOCK = "█"
+# A terminal row split into a top and a bottom half: (top filled, bottom filled) -> character.
+_HALF_BLOCKS = {(True, True): BLOCK, (True, False): "▀", (False, True): "▄", (False, False): " "}
 
 
-# The sizes the sign comes in, biggest first, as (columns, rows) per font
-# cell. A terminal cell is about twice as tall as it is wide, so a cell twice
-# as many columns as rows keeps the letters' proportions: (4, 2) is double the
-# (2, 1) size, and (1, 1) is the compact fallback.
-SIGN_SCALES = ((4, 2), (2, 1), (1, 1))
+# The sizes the sign comes in, biggest first: (columns, half-rows) per font
+# cell, and the columns between letters (words are five times that apart, as
+# in the font's own spacing). A terminal cell is about twice as tall as it is
+# wide, so a cell as many half-rows tall as it is columns wide keeps the
+# letters' shape: (2, 2) is the original size -- 2 columns by 1 row -- and
+# (3, 3) one and a half times it, its half rows drawn with half blocks.
+SIGN_SIZES = (
+    (3, 3, 3),  # 1.5x: 237 columns wide, 8 rows tall
+    (3, 3, 2),  # 1.5x, letters 2 columns apart: 220 wide
+    (3, 3, 1),  # 1.5x, letters 1 column apart: 203 wide
+    (2, 2, 2),  # the original size: 158 wide, 5 rows
+    (1, 2, 1),  # compact: 79 wide
+)
+SIGN_MARGIN = 4  # columns kept clear on either side of the sign, at the least
 
 
-def sign_rows(text: str, cell_w: int, cell_h: int = 1) -> List[str]:
+def sign_rows(text: str, cell_w: int, cell_h: int, gap: int) -> List[str]:
     """`text` in block letters, each font cell `cell_w` columns wide and
-    `cell_h` rows tall, with one blank cell between letters."""
-    gap = " " * cell_w
-    rows = [
-        gap.join("".join(BLOCK * cell_w if px == "#" else " " * cell_w for px in _FONT[ch][row]) for ch in text)
-        for row in range(5)
+    `cell_h` half-rows tall, letters `gap` columns apart and words `5 * gap`."""
+    half_rows: List[str] = []
+    for row in range(5):
+        words = [
+            (" " * gap).join("".join(("#" if px == "#" else " ") * cell_w for px in _FONT[ch][row]) for ch in word)
+            for word in text.split(" ")
+        ]
+        half_rows += [(" " * (5 * gap)).join(words)] * cell_h
+    if len(half_rows) % 2:
+        half_rows.append(" " * len(half_rows[0]))
+    return [
+        "".join(_HALF_BLOCKS[(top == "#", bottom == "#")] for top, bottom in zip(upper, lower))
+        for upper, lower in zip(half_rows[0::2], half_rows[1::2])
     ]
-    return [row for row in rows for _ in range(cell_h)]
 
 
 def fit_sign(width: int, height: int) -> List[str]:
-    """The biggest version of the sign that fits in `width` x `height`: each
-    size on one line, then stacked as BADDIE'S over CASINO -- or, in a tiny
-    window, the name in plain text."""
+    """The biggest version of the sign that fits in `width` x `height` on one
+    line, with SIGN_MARGIN clear on either side -- in a window too narrow for
+    any of them, BADDIE'S over CASINO, and in a tiny one the name in plain
+    text."""
     first, second = SIGN_TEXT.split(" ")
-    for cell_w, cell_h in SIGN_SCALES:
-        one_line = sign_rows(SIGN_TEXT, cell_w, cell_h)
-        stacked = sign_rows(first, cell_w, cell_h) + [""] * cell_h + sign_rows(second, cell_w, cell_h)
-        for rows in (one_line, stacked):
-            if max(len(r) for r in rows) <= width - 4 and len(rows) <= height:
-                return rows
+    one_line = [sign_rows(SIGN_TEXT, *size) for size in SIGN_SIZES]
+    stacked = [sign_rows(first, *size) + [""] + sign_rows(second, *size) for size in SIGN_SIZES[-2:]]
+    for rows in one_line + stacked:
+        if max(len(r) for r in rows) <= width - 2 * SIGN_MARGIN and len(rows) <= height:
+            return rows
     return [SIGN_TEXT]
 
 
@@ -167,13 +186,22 @@ class Menu:
 class Game:
     name: str
     bank_key: str  # the game's entry in the bank's game_winnings
-    launch: Callable[[], None]  # runs the game to completion in the terminal, as its own `python3 -m` would
+    # Runs the game in the terminal, as its own `python3 -m` would, until the
+    # player leaves: returns "quit" to close the casino, else ("floor", for
+    # 'exit') it's back to the floor.
+    launch: Callable[[], Optional[str]]
 
 
-def _play_blackjack() -> None:
-    from blackjack.ui import run
+def blackjack_game(db_path: Optional[Path] = None) -> Game:
+    """Classic Blackjack, on its default history database or on `db_path`
+    (python3 -m blackjack --db FILE, then 'exit' to the floor)."""
 
-    run()
+    def launch() -> str:
+        from blackjack.ui import run
+
+        return run(db_path)
+
+    return Game("Classic Blackjack", "blackjack", launch)
 
 
 def _blackjack_opening() -> Opening:
@@ -185,7 +213,7 @@ def _blackjack_opening() -> Opening:
 
 
 # Every game on the floor, in menu order -- a new game is one more entry.
-GAMES: List[Game] = [Game("Classic Blackjack", "blackjack", _play_blackjack)]
+GAMES: List[Game] = [blackjack_game()]
 BANK_ITEMS = [
     MenuItem("Account Summary", "summary"),
     MenuItem("Deposit", "deposit"),
@@ -732,9 +760,10 @@ def _exit_on_signal(signum, _frame) -> None:
     raise SystemExit(128 + signum)
 
 
-def run() -> None:
-    """Open the casino floor; each game picked there runs until it's quit,
-    then it's back to the floor, until the player leaves."""
+def run(games: Optional[List[Game]] = None) -> None:
+    """Open the casino floor. Each game picked there runs until the player
+    leaves it: 'exit' comes back to the floor, 'quit' closes the casino -- as
+    does leaving the floor itself. `games` stands in for GAMES."""
     for name in ("SIGHUP", "SIGTERM"):  # leave curses cleanly on a closed window or a plain kill
         sig = getattr(signal, name, None)
         if sig is not None:
@@ -744,10 +773,9 @@ def run() -> None:
         sys.stdout.flush()
     except Exception:  # pragma: no cover - a closed stdout just means no maximize
         pass
-    floor = Floor()
+    floor = Floor(games)
     while True:
         game = curses.wrapper(_floor_main, floor)
-        if game is None:
+        if game is None or game.launch() == "quit":
             return
-        game.launch()
         floor.message = f"Back on the floor from {game.name}."

@@ -9,16 +9,18 @@ screen that every game is launched from:
 python3 -m casino
 ```
 
-Across the top runs the **BADDIE'S CASINO** sign in big lime-green block
-letters: BADDIE'S over CASINO, or on one line in a window over 320 columns
-wide, and smaller in a smaller window. Below it is a purple **Luxury Gaming
-and Amenities** banner with 3 inches clear on either side. Under them sit two
+Across the top runs the **BADDIE'S CASINO** sign, on one line, in lime-green
+block letters one and a half times their original size (the half rows are
+drawn with half blocks, `▀` and `▄`). It always keeps some room on either
+side: in a window that can't fit it, the letters move closer together first,
+then the sign drops to its original size or smaller. Only a very narrow
+window stacks it as BADDIE'S over CASINO. Below it is a purple **Luxury
+Gaming and Amenities** banner with 3 inches clear on either side. Under them sit two
 menus side by side. Each runs from an inch in from its side of the screen
 toward the middle, and down to where the bottom 15% of the screen begins:
 
 - **Games** — every game in the casino (**Classic Blackjack**, for now).
-  Picking one launches it exactly as `python3 -m blackjack` does, and quitting
-  the game brings you back to the floor.
+  Picking one launches it exactly as `python3 -m blackjack` does.
 - **Bank** — **Account Summary** (your balance, what each game has won, and
   your total deposits and withdrawals), **Deposit**, **Withdraw** (up to your
   balance), and **Transactions** (every deposit and withdrawal, newest first).
@@ -39,6 +41,12 @@ if you use a different font size or display scaling.
 | Click anywhere off the menus (or Esc) | Clear the highlight. Any arrow key, or a click on an option, brings it back |
 | Scroll wheel over a menu | Move its highlight |
 | `q`, or click **Leave Casino** | Leave the casino |
+
+Every game leaves the same two ways, both saving first: **`exit`** takes you
+back to the casino floor, and **`quit`** closes Baddie's Casino entirely.
+`exit` opens the floor even if you started the game on its own (`python3 -m
+blackjack`); if you started it with `--db FILE`, blackjack picked from that
+floor keeps using the same file.
 
 ## The Bank
 
@@ -595,7 +603,8 @@ python3 -m blackjack
 ```
 
 or pick it from the casino floor (`python3 -m casino`, see **The Casino
-Floor**). The game maximizes your terminal window on launch. Your wagers and
+Floor**). `exit` takes you to the floor, however you started; `quit` closes
+everything. The game maximizes your terminal window on launch. Your wagers and
 table rules are saved to `~/.cs-blackjack_state.json` and reloaded
 automatically the next time you launch; your bankroll is the casino bank's
 (see **The Bank**). (Your data keeps the game's earlier
@@ -726,7 +735,8 @@ a whole number is shown as the fraction it equals: `buster 3 1.5` reads
 | `help` / `?` | Show the full command list |
 | `gamerules` | Show the full table-rules screen |
 | `stats` | Show the lifetime/session stats screen |
-| `quit` / `exit` | Quit Blackjack |
+| `exit` | Save and go back to the casino floor (it opens even if you launched blackjack on its own) |
+| `quit` | Save and close Baddie's Casino |
 
 Side bet payout odds are always shown live in the stats bar below the
 table, so there's no separate command to look them up.

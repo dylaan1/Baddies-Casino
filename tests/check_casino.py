@@ -6,9 +6,10 @@ is set aside, never overwritten. Blackjack's old bankroll moves in exactly once,
 and what blackjack won, and is never lost if the bank can't be created; blackjack's bank commands land as
 deposits/withdrawals and its table results as winnings. The floor: where everything goes (the sign, the
 banner, the menus' inch margins, the clear bottom 15%, the notice on the last line), menus stop at their ends and
-scroll, focus moves between them, clicking off clears the highlight, and the bank options move money within the
-limits."""
+scroll, focus moves between them, clicking off clears the highlight, the bank options move money within the
+limits, and a game's 'exit' comes back to the floor while 'quit' closes the casino."""
 import importlib
+import io
 import json
 import math
 import os
@@ -208,8 +209,8 @@ f.open_bank()
 H, W = 60, 238                                                         # about a maximized window on a 13-inch MacBook Pro
 lay = f.layout(H, W)
 (by, left_x), (_, right_x) = lay.boxes
-check(lay.fits and lay.sign_y == 1 and len(lay.sign) == 22 and max(len(r) for r in lay.sign) == 164,
-      "the sign: a blank row from the top, then BADDIE'S over CASINO at double size (each cell 4 columns x 2 rows)")
+check(lay.fits and lay.sign_y == 1 and len(lay.sign) == 8 and max(len(r) for r in lay.sign) == 220 and (W - 220) // 2 >= floor_m.SIGN_MARGIN,
+      "the sign: a blank row from the top, then one line at 1.5x the original size (letters 2 columns apart, 9 columns clear each side)")
 check(lay.banner_y == lay.sign_y + len(lay.sign) + 1 and lay.banner_x == 3 * inch and lay.banner_x + lay.banner_w == W - 3 * inch,
       f"a blank row, then the banner, 3 inches ({3 * inch} columns) clear on either side")
 check(by == lay.banner_y + 2 and left_x == inch and right_x + lay.box_w == W - inch and right_x - (left_x + lay.box_w) in (4, 5),
@@ -245,11 +246,19 @@ f.wheel(lay.boxes[0][0] + 2, lay.boxes[0][1] + 4, 1)
 check(f.focus == 0 and f.menus[0].cursor == 39, "the scroll wheel over a menu moves its highlight (stopping at the end)")
 
 check(not floor_m.Floor().layout(10, 50).fits, "a window too small for the menus says so instead of drawing them")
-check(len(floor_m.fit_sign(330, 40)) == 10, "a window wide enough (320+ columns) gets the double-size sign on one line")
-for w in (238, 100, 70):
+original = floor_m.fit_sign(170, 40)
+check(len(original) == 5 and len(original[0]) == 158 and set("".join(original)) <= {floor_m.BLOCK, " "},
+      "the original size is 158 columns x 5 rows of full blocks")
+wide = floor_m.fit_sign(260, 40)
+check(len(wide) == 8 and len(wide[0]) == 237 and set("".join(wide)) == {floor_m.BLOCK, "▀", "▄", " "},
+      "a window with room (245+ columns) gets 1.5x with the font's own spacing: 237 columns x 7 1/2 rows, the half rows in half blocks")
+for w in (238, 215, 200, 100):
     rows = floor_m.fit_sign(w, 40)
-    check(max(len(r) for r in rows) <= w - 4 and all(set(r) <= {floor_m.BLOCK, " "} for r in rows),
-          f"the sign fits a {w}-column window, all block characters ({len(rows)} rows)")
+    check(max(len(r) for r in rows) <= w - 2 * floor_m.SIGN_MARGIN and len(rows) <= 8 and set("".join(rows)) <= {floor_m.BLOCK, "▀", "▄", " "},
+          f"in a {w}-column window the sign is on one line, with room either side ({max(len(r) for r in rows)} columns)")
+narrow_sign = floor_m.fit_sign(70, 40)
+check(len(narrow_sign) == 11 and max(len(r) for r in narrow_sign) <= 70 - 2 * floor_m.SIGN_MARGIN,
+      "only a window too narrow for any one-line size (under 87 columns) stacks it, BADDIE'S over CASINO")
 check(floor_m.fit_sign(30, 40) == [floor_m.SIGN_TEXT], "...and in a tiny window it's plain text")
 
 f = floor_m.Floor()
@@ -262,5 +271,26 @@ check(msg.startswith("Withdrew $2,500.00 -- balance $7,500.00") and bank_m.Bank.
 lines = f.transaction_lines()
 check(len(lines) == 2 and "Withdrawal" in lines[0] and "-$2,500.00" in lines[0] and "Opening" in lines[1], "transactions list newest first")
 check([floor_m.parse_amount(t) for t in ("1,500", "$250.50", "abc")] == [1500.0, 250.5, None], "amounts can be typed with commas or a $")
+
+# =============================================================== I. leaving a game: 'exit' to the floor, 'quit' closes the casino
+s = S.make_session(decks=6)
+check(commands.handle_command("exit", s) == "Back to the casino floor..." and s.quit_requested and s.leave_to == "floor",
+      "'exit' ends the game, headed for the casino floor")
+s = S.make_session(decks=6)
+check(commands.handle_command("quit", s) == "Closing Baddie's Casino..." and s.quit_requested and s.leave_to == "quit",
+      "'quit' ends the game, closing the casino")
+check(any(l.split()[0] == "exit" for l in commands.HELP_LINES if l.strip()) and any(l.split()[0] == "quit" for l in commands.HELP_LINES if l.strip()),
+      "the help lists them separately")
+
+played = []
+fake = floor_m.Game("Fake Game", "fake", lambda: played.append(1) or ("floor" if len(played) < 3 else "quit"))
+real_wrapper, real_stdout = floor_m.curses.wrapper, floor_m.sys.stdout
+floor_m.curses.wrapper = lambda fn, fl: fake                           # every visit to the floor picks the game again
+floor_m.sys.stdout = io.StringIO()                                      # (no maximize request to the real terminal)
+try:
+    floor_m.run([fake])
+finally:
+    floor_m.curses.wrapper, floor_m.sys.stdout = real_wrapper, real_stdout
+check(len(played) == 3, "the floor takes back a game left with 'exit', and closes with the casino when it's left with 'quit'")
 
 check.finish("check_casino")

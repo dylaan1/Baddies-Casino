@@ -221,11 +221,13 @@ g = Game(home, rows=60, cols=238, cmd=[sys.executable, "-m", "casino"])
 g.pump(2.5)
 screen = g.text()
 lines = g.screen.display
-check(screen.count("█") > 1000 and "GAMES" in screen and "BANK" in screen and "Balance: $10,000.00" in screen,
+check(screen.count("█") > 500 and "GAMES" in screen and "BANK" in screen and "Balance: $10,000.00" in screen,
       "the casino floor: the block-letter sign, the GAMES and BANK menus, and a new player's $10,000.00")
 check(lit(g).startswith("▶ Classic Blackjack") and "Leave Casino" in screen, "Classic Blackjack starts highlighted")
 sign_y, sign_x = find(g, "█")
-check(lines[0].strip() == "" and sign_y == 1 and g.screen.buffer[sign_y][sign_x].fg == "87ff00", "the sign starts a row from the top, in lime green")
+check(lines[0].strip() == "" and sign_y == 1 and g.screen.buffer[sign_y][sign_x].fg == "87ff00" and "▀" in lines[8] and lines[9].strip() == "",
+      "the sign starts a row from the top, in lime green, on one line (8 rows)")
+check(sign_x >= 4 and max(i for i, ch in enumerate(lines[1]) if ch == "█") <= 238 - 5, "...with room on either side")
 banner_y, _ = find(g, "Luxury Gaming and Amenities")
 purple = [x for x in range(238) if g.screen.buffer[banner_y][x].bg == "8700af"]
 check(lines[banner_y - 1].strip() == "" and purple and (purple[0], purple[-1]) == (63, 174),
@@ -242,12 +244,12 @@ check("Bankroll: $10,000.00" in g.text(), "Enter on Classic Blackjack launches t
 g.send("\r", 4.0)
 g.to_idle()
 g.send("\x1b", 1.3)
-g.command("quit", 3.0)
+g.command("exit", 3.0)
 c = db(home)
 table_pl = c.execute("select sum(total_pl) from hands").fetchone()[0]
 c.close()
 bank = bank_file(home)
-check("Back on the floor from Classic Blackjack." in g.text() and g.alive(), "quitting blackjack comes back to the floor")
+check("Back on the floor from Classic Blackjack." in g.text() and g.alive(), "'exit' in blackjack comes back to the floor")
 check(abs(bank["game_winnings"]["blackjack"] - table_pl) < 1e-6 and f"Balance: ${bank['balance']:,.2f}" in g.text(),
       f"...where the balance shows what was won or lost at the table ({table_pl:+.2f}), as the bank file has it")
 
@@ -282,10 +284,37 @@ check("Withdrew $400.00" in g.text() and abs(bank_file(home)["withdrawn"] - 400)
 g.send(DOWN, 0.4)
 g.send("\r", 0.8)
 rows = g.text()
-check("TRANSACTIONS" in rows and rows.index("Withdrawal") < rows.index("Deposit") < rows.index("Opening"), "Transactions lists them, newest first")
+listing = rows[rows.index("TRANSACTIONS"):] if "TRANSACTIONS" in rows else ""
+check(listing and listing.index("Withdrawal") < listing.index("Deposit") < listing.index("Opening"), "Transactions lists them, newest first")
 g.send("q", 0.6)
+check("TRANSACTIONS" not in g.text(), "q closes the list")
+g.send(LEFT, 0.4)
+g.send("\r", 3.5)
+check("Bankroll: $" in g.text(), "back into Classic Blackjack")
+g.command("quit", 3.0)
+check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "'quit' in a game closes Baddie's Casino entirely, cleanly")
+
+# =============================================================== F. 'exit' from blackjack started on its own
+home = tempfile.mkdtemp(prefix="csbj-ui-exit-")
+practice = os.path.join(home, "practice.db")
+g = Game(home, rows=60, cols=238, args=("--db", practice))
+g.pump(2.5)
+g.send("\r", 4.0)
+g.to_idle()
+g.command("exit", 3.0)
+check("Luxury Gaming and Amenities" in g.text() and g.alive(), "'exit' from blackjack started on its own (python3 -m blackjack) opens the casino floor")
+g.send("\r", 3.5)
+g.send("\r", 4.0)
+g.to_idle()
+g.command("exit", 3.0)
+check("Back on the floor from Classic Blackjack." in g.text(), "...and blackjack picked there comes back to it on 'exit' too")
 g.send("q", 1.0)
-check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "q closes the list, then leaves the casino cleanly")
+check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "q on the floor closes the casino")
+c = sqlite3.connect(practice)
+sessions = c.execute("select count(*) from sessions where ended_at is not null").fetchone()[0]
+c.close()
+check(sessions == 2 and not os.path.exists(os.path.join(home, ".cs-blackjack", "blackjack.db")),
+      "both visits played on the --db file (2 closed sessions there), never the default database")
 
 print()
 print("check_ui: FAILED" if fails else "check_ui: ALL UI CHECKS PASSED", *fails, sep="\n  - " if fails else "")
