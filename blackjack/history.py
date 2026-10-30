@@ -447,7 +447,7 @@ def _check_database(path: Path) -> None:
             raise HistoryError("Backup database is from a newer version of the game.")
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if not {"sessions", "shoes", "hands"} <= tables:
-            raise HistoryError("That file isn't a cs-blackjack history database.")
+            raise HistoryError("That file isn't a Blackjack history database.")
     except sqlite3.DatabaseError as exc:
         raise HistoryError(f"Backup database is unreadable: {exc}")
     finally:
@@ -547,7 +547,7 @@ def _mysql_dump(conn: sqlite3.Connection):
     views = conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'view' ORDER BY name").fetchall()
 
     yield (
-        "-- cs-blackjack history export for MySQL / MariaDB\n"
+        "-- Baddie's Casino Blackjack history export for MySQL / MariaDB\n"
         f"-- Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} from {DB_NAME}. All timestamps are UTC.\n"
         "--\n"
         "-- Load it into an EMPTY schema you've chosen (it drops and recreates these tables):\n"

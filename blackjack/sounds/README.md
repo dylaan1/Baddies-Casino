@@ -2,7 +2,7 @@
 
 Drop the following audio files into this folder and they'll play
 automatically the next time the game runs -- nothing else needs to
-change. See `cs-blackjack/sound.py` for the playback logic (it silently
+change. See `blackjack/sound.py` for the playback logic (it silently
 does nothing if a file is missing or no supported command-line player is
 installed, so the game runs fine with this folder empty).
 

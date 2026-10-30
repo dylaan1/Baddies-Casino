@@ -7,7 +7,7 @@ from .ui import run
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="cs-blackjack", description="Terminal blackjack for practice and card counting.")
+    parser = argparse.ArgumentParser(prog="blackjack", description="Terminal blackjack for practice and card counting.")
     parser.add_argument(
         "--db",
         metavar="FILE",

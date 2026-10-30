@@ -1,4 +1,4 @@
-# CasinoSimulations™
+# Baddie's Casino™
 
 ## Blackjack
 
@@ -323,7 +323,7 @@ reference while you play.
 Optional audio cues, played through whichever of `afplay`/`paplay`/
 `aplay`/`ffplay`/`mpg123` is on your system `PATH` — the game runs
 completely fine with no sound at all if none of those are found. Drop the
-matching file into `cs-blackjack/sounds/` (see that folder's own
+matching file into `blackjack/sounds/` (see that folder's own
 `README.md`) and it plays automatically, no restart or config needed:
 
 | File | Plays when |
@@ -398,7 +398,7 @@ adds a sound beyond the ordinary card-deal ones.
   database existed, imported once — see **Data storage**); session means the
   current session's hands. There is no command to zero the lifetime numbers,
   because that would mean erasing data: to start over with a clean slate,
-  launch with a different database file (`python3 -m cs-blackjack --db
+  launch with a different database file (`python3 -m blackjack --db
   ~/fresh.db`) and the old one stays exactly as it is.
 - **Net Return**: a running "Net Return: $X.XX" figure on the red status
   bar, directly below Bankroll, tracking this round's cumulative result
@@ -504,10 +504,10 @@ No third-party packages are required to run the game itself.
 
 ```bash
 git clone <repo-url>
-cd CasinoSimulations
+cd Baddies-Casino
 ```
 
-That's it — `cs-blackjack` is pure standard library, so there's nothing to
+That's it — `blackjack` is pure standard library, so there's nothing to
 `pip install`.
 
 ### Launch
@@ -515,12 +515,14 @@ That's it — `cs-blackjack` is pure standard library, so there's nothing to
 Run it as a module from the repository root:
 
 ```bash
-python3 -m cs-blackjack
+python3 -m blackjack
 ```
 
 The game maximizes your terminal window on launch. Your bankroll, wagers,
 and table rules are saved to `~/.cs-blackjack_state.json` and reloaded
-automatically the next time you launch. Every hand, session, and shoe is
+automatically the next time you launch. (Your data keeps the game's earlier
+name, `cs-blackjack`, so existing saves and history carry straight on.)
+Every hand, session, and shoe is
 logged to a SQLite database at `~/.cs-blackjack/blackjack.db`, and all of
 the game's lifetime and session stats are computed from it — see **Data
 storage** below.
@@ -529,7 +531,7 @@ To start with a clean slate without deleting anything, point the game at a
 different database file (it's created if it doesn't exist):
 
 ```bash
-python3 -m cs-blackjack --db ~/blackjack-2027.db
+python3 -m blackjack --db ~/blackjack-2027.db
 ```
 
 The original database is left exactly as it was, and you can go back to it
@@ -638,7 +640,7 @@ like everything else, so they carry over between sessions.
 | `help` / `?` | Show the full command list |
 | `gamerules` | Show the full table-rules screen |
 | `stats` | Show the lifetime/session stats screen |
-| `quit` / `exit` | Quit cs-blackjack |
+| `quit` / `exit` | Quit Blackjack |
 
 Side bet payout odds are always shown live in the stats bar below the
 table, so there's no separate command to look them up.
@@ -681,7 +683,7 @@ table, so there's no separate command to look them up.
 | `engine.py` | `GameSession`/`Round` — the full round state machine: dealing order, prelim prompts, player actions, settlement timing |
 | `ui.py` | The `curses` TUI: layout, rendering, animation, input handling |
 | `sound.py` | Fire-and-forget sound-effect playback (see `sounds/README.md`) |
-| `__main__.py` | `python3 -m cs-blackjack` entry point (`--db FILE` picks a different history database) |
+| `__main__.py` | `python3 -m blackjack` entry point (`--db FILE` picks a different history database) |
 | `tests/` | The test suite and analysis tools — see **Testing** |
 
 ### Testing

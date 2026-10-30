@@ -88,7 +88,7 @@ HELP_LINES = [
     "  help | ?                       Show this screen",
     "  gamerules                      Show the full table-rules screen",
     "  stats                          Show the lifetime/session stats screen",
-    "  quit | exit                    Quit cs-blackjack",
+    "  quit | exit                    Quit Blackjack",
 ]
 
 HELP_TEXT = "  |  ".join(line.strip() for line in HELP_LINES if line.strip())

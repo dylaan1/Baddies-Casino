@@ -1,6 +1,6 @@
 """Fire-and-forget sound effects.
 
-Drop the matching audio files into cs-blackjack/sounds/ (next to this
+Drop the matching audio files into blackjack/sounds/ (next to this
 module -- create the folder if it doesn't exist yet) and they play
 automatically the next time the game runs; nothing needs to change in
 code. Expected filenames:

@@ -29,7 +29,7 @@ os.environ["HOME"] = HOME
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(TESTS))
 
-cb = lambda name: importlib.import_module("cs-blackjack." + name)
+cb = lambda name: importlib.import_module("blackjack." + name)
 engine, rules_m, cards, history, persist, commands, stats_m, ui = (
     cb(n) for n in ("engine", "rules", "cards", "history", "persist", "commands", "stats", "ui"))
 Phase = engine.Phase

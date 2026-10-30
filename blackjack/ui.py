@@ -1169,7 +1169,7 @@ def render(
     # RSA), then a divider before the dealer's area ----
     shoe = session.shoe
     y = y_origin
-    title = "CasinoSimulations™ Blackjack"
+    title = "Baddie's Casino™ Blackjack"
     _safe_addstr(win, y, _center_x(title, usable_width, left_margin), title, curses.A_BOLD)
     y += 1
 
@@ -1480,7 +1480,7 @@ def render(
 def render_too_small(stdscr) -> None:
     stdscr.erase()
     lines, cols = stdscr.getmaxyx()
-    msg = f"cs-blackjack needs a full-screen (or at least {MIN_COLS}x{MIN_LINES}) terminal -- currently {cols}x{lines}."
+    msg = f"Blackjack needs a full-screen (or at least {MIN_COLS}x{MIN_LINES}) terminal -- currently {cols}x{lines}."
     _safe_addstr(stdscr, min(1, lines - 1), 0, msg)
     stdscr.refresh()
 
@@ -1549,7 +1549,7 @@ def _render_overlay_lines(stdscr, title: str, lines: List[str]) -> None:
 
 
 def render_help_screen(stdscr) -> None:
-    _render_overlay_lines(stdscr, "cs-blackjack -- Command Reference", commands.HELP_LINES)
+    _render_overlay_lines(stdscr, "Blackjack -- Command Reference", commands.HELP_LINES)
 
 
 def render_gamerules_screen(stdscr, session: GameSession) -> None:
@@ -1621,7 +1621,7 @@ def render_gamerules_screen(stdscr, session: GameSession) -> None:
         "  If a shoe ever runs out in the middle of a round, the discards are",
         "  shuffled back in and the round carries on (the count starts over).",
     ]
-    _render_overlay_lines(stdscr, "cs-blackjack -- Game Rules", lines)
+    _render_overlay_lines(stdscr, "Blackjack -- Game Rules", lines)
 
 
 def render_stats_screen(stdscr, session: GameSession, round_: Optional[Round]) -> None:
@@ -1699,7 +1699,7 @@ def render_stats_screen(stdscr, session: GameSession, round_: Optional[Round]) -
         lines.append("  " + table_gap.join(cells))
 
     lines.extend(_history_stats_lines(session))
-    _render_overlay_lines(stdscr, "cs-blackjack -- Stats", lines)
+    _render_overlay_lines(stdscr, "Blackjack -- Stats", lines)
 
 
 def _history_stats_lines(session: GameSession) -> List[str]:
@@ -1767,7 +1767,7 @@ def render_backups_screen(stdscr, session: GameSession) -> None:
     if not backups:
         lines.append("  (none yet -- 'backup' makes one)")
     lines.extend(["", "  restore <name>   replaces ALL current data with that backup (a prefix of the name is enough)"])
-    _render_overlay_lines(stdscr, "cs-blackjack -- Backups  (~/.cs-blackjack/backups/)", lines)
+    _render_overlay_lines(stdscr, "Blackjack -- Backups  (~/.cs-blackjack/backups/)", lines)
 
 
 def render_betspread_screen(stdscr) -> None:
@@ -1781,7 +1781,7 @@ def render_betspread_screen(stdscr) -> None:
         lines.append(header)
         for tc, a, b, c in rows:
             lines.append(f"  {tc:<{col_w[0]}}{a:<{col_w[1]}}{b:<{col_w[2]}}{c:<{col_w[3]}}")
-    _render_overlay_lines(stdscr, "cs-blackjack -- Bet Spread", lines)
+    _render_overlay_lines(stdscr, "Blackjack -- Bet Spread", lines)
 
 
 def _blink_new_shoe(stdscr, session: GameSession, round_: Optional[Round]) -> None:

@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-cards = importlib.import_module("cs-blackjack.cards")
-engine = importlib.import_module("cs-blackjack.engine")
-ui = importlib.import_module("cs-blackjack.ui")
+cards = importlib.import_module("blackjack.cards")
+engine = importlib.import_module("blackjack.engine")
+ui = importlib.import_module("blackjack.ui")
 
 _first = {"pending": True}
 _orig = cards.Shoe.shuffle
