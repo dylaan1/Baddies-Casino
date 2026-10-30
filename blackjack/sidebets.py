@@ -16,7 +16,9 @@ Result = Optional[Tuple[str, str, float]]  # (category key, label, payout multip
 # the "<sidebet> <key> <payout>" command and the lifetime occurrence
 # counters use; label is the display text shown in banners/payout tables
 # (unchanged from before, so existing display formatting -- e.g.
-# _display_label's " Diamonds" -> "♦" swap -- keeps working as-is).
+# _display_label's " Diamonds" -> "♦" swap -- keeps working as-is). Each
+# list runs highest default payout to lowest: the live payout tables in the
+# stats bar show their rows in exactly this order.
 POWER_POKER_CATEGORIES: List[Tuple[str, str]] = [
     ("royalflush", "Royal Flush"),
     ("straightflush", "Straight Flush"),
@@ -29,16 +31,16 @@ STAR21_STANDARD_CATEGORIES: List[Tuple[str, str]] = [
     ("suited777", "Suited 7-7-7"),
     ("suited678", "Suited 6-7-8"),
     ("unsuited777", "Unsuited 7-7-7"),
-    ("suited21", "Suited 21"),
     ("unsuited678", "Unsuited 6-7-8"),
+    ("suited21", "Suited 21"),
     ("unsuited21", "Unsuited 21"),
     ("any20", "Any 20"),
     ("any19", "Any 19"),
 ]
 STAR21_DOUBLE_CATEGORIES: List[Tuple[str, str]] = [
     ("suited678", "Suited 6-7-8"),
-    ("suited21", "Suited 21"),
     ("unsuited678", "Unsuited 6-7-8"),
+    ("suited21", "Suited 21"),
     ("unsuited21", "Unsuited 21"),
     ("any20", "Any 20"),
     ("any19", "Any 19"),
@@ -58,16 +60,16 @@ BUSTER_CATEGORIES: List[Tuple[str, str]] = [
 PAYOUT_TABLE_KEYS = ("power_poker", "star21_standard", "star21_double", "buster_multi", "buster_single")
 
 _DEFAULT_PAYOUTS: Dict[str, Dict[str, float]] = {
-    "power_poker": {"royalflush": 50.0, "straightflush": 40.0, "trips": 25.0, "straight": 10.0, "flush": 3.0},
+    "power_poker": {"royalflush": 100.0, "straightflush": 40.0, "trips": 30.0, "straight": 10.0, "flush": 5.0},
     "star21_standard": {
-        "suited777d": 5000.0, "suited777": 500.0, "suited678": 100.0, "unsuited777": 50.0,
-        "suited21": 30.0, "unsuited678": 20.0, "unsuited21": 8.0, "any20": 4.0, "any19": 3.0,
+        "suited777d": 2000.0, "suited777": 500.0, "suited678": 100.0, "unsuited777": 50.0,
+        "unsuited678": 30.0, "suited21": 25.0, "unsuited21": 4.0, "any20": 3.0, "any19": 2.0,
     },
     "star21_double": {
-        "suited678": 500.0, "suited21": 50.0, "unsuited678": 40.0, "unsuited21": 10.0, "any20": 4.0, "any19": 3.0,
+        "suited678": 100.0, "unsuited678": 30.0, "suited21": 25.0, "unsuited21": 4.0, "any20": 3.0, "any19": 2.0,
     },
-    "buster_multi": {"8+": 250.0, "7": 100.0, "6": 50.0, "5": 12.0, "4": 3.0, "3": 2.0},
-    "buster_single": {"8+": 500.0, "7": 100.0, "6": 50.0, "5": 12.0, "4": 3.0, "3": 2.0},
+    "buster_multi": {"8+": 250.0, "7": 50.0, "6": 12.0, "5": 4.0, "4": 3.0, "3": 2.0},
+    "buster_single": {"8+": 500.0, "7": 50.0, "6": 12.0, "5": 4.0, "4": 3.0, "3": 2.0},
 }
 
 
@@ -101,7 +103,7 @@ def evaluate_power_poker(player_cards: List[Card], dealer_up: Card, payouts: Dic
 
     Trips is checked ahead of straight/flush: with 2+ decks in the shoe, a
     trips hand can also be a flush (three same-rank cards that happen to
-    share a suit), and trips now pays more (25:1) than a plain flush (3:1),
+    share a suit), and trips now pays more (30:1) than a plain flush (5:1),
     so it must win the priority order, not just lose to flush by being
     checked later.
     """
