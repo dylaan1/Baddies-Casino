@@ -2048,7 +2048,7 @@ def _hit_test_cell(cell_rects: CellRects, my: int, mx: int) -> Optional[Union[st
     return None
 
 
-def _main(stdscr, db_path: Optional[Path] = None) -> None:
+def _main(stdscr, db_path: Optional[Path] = None) -> str:
     curses.curs_set(0)
     stdscr.keypad(True)
     # Non-blocking-with-timeout getch() so the loop wakes up on its own to
@@ -2541,6 +2541,7 @@ def _main(stdscr, db_path: Optional[Path] = None) -> None:
             history.record_round(session, round_)
         save_game(session)
         history.close(session)
+    return session.leave_to or "quit"
 
 
 def save_game(session: GameSession) -> None:
@@ -2557,10 +2558,11 @@ def _exit_on_signal(signum, _frame) -> None:
     raise SystemExit(128 + signum)
 
 
-def run(db_path: Optional[Path] = None) -> None:
+def run(db_path: Optional[Path] = None) -> str:
     """Launch the game. db_path picks a different history database file
     (created if it doesn't exist) -- the way to start fresh without deleting
-    anything."""
+    anything. Returns how the player left: "floor" ('exit' -- back to the
+    casino floor) or "quit" (close Baddie's Casino)."""
     # Closing the terminal window (SIGHUP) or a plain `kill` (SIGTERM) would
     # otherwise end the process on the spot; turn them into an ordinary exit
     # so _main's cleanup runs -- it saves the game and writes the shoe's
@@ -2578,7 +2580,7 @@ def run(db_path: Optional[Path] = None) -> None:
     # can be repainted when the player comes back to it.
     _write_terminal("\x1b[9;1t\x1b[?1004h")
     try:
-        curses.wrapper(_main, db_path)
+        return curses.wrapper(_main, db_path)
     finally:
         # Focus reporting outlives the program unless it's switched off: the
         # shell would print ^[[I / ^[[O every time the window changed focus.

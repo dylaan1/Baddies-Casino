@@ -201,7 +201,10 @@ class GameSession:
             if side_bet_wagers
             else [{key: 0.0 for key in SIDE_BET_KEYS} for _ in range(3)]
         )
-        self._quit = False
+        # How the player asked to leave the table, once they have: "floor"
+        # ('exit': back to the casino floor) or "quit" (close Baddie's
+        # Casino). Either one ends the game loop, saving first.
+        self.leave_to: Optional[str] = None
         self.pending_confirmation: Optional[str] = None  # "newshoe" | "newsession" | "bank_reset", awaiting a RETURN to confirm
         self.pending_restore: Optional[str] = None  # backup name awaiting the literal word "confirm"
         if self.history is not None:
@@ -268,11 +271,17 @@ class GameSession:
         return self.bankroll >= amount
 
     def request_quit(self) -> None:
-        self._quit = True
+        """'quit': save and close Baddie's Casino entirely."""
+        self.leave_to = "quit"
+
+    def request_exit(self) -> None:
+        """'exit': save and go back to the casino floor."""
+        self.leave_to = "floor"
 
     @property
     def quit_requested(self) -> bool:
-        return self._quit
+        """True once the player has asked to leave the table, either way."""
+        return self.leave_to is not None
 
     def _roll_penetration(self) -> None:
         """Re-rolls rules.penetration to a fresh random value (see

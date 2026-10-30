@@ -88,7 +88,8 @@ HELP_LINES = [
     "  help | ?                       Show this screen",
     "  gamerules                      Show the full table-rules screen",
     "  stats                          Show the lifetime/session stats screen",
-    "  quit | exit                    Quit Blackjack",
+    "  exit                           Save and go back to the casino floor",
+    "  quit                           Save and close Baddie's Casino",
 ]
 
 HELP_TEXT = "  |  ".join(line.strip() for line in HELP_LINES if line.strip())
@@ -350,9 +351,13 @@ def _dispatch(
     if head in ("help", "?"):
         return HELP_TEXT
 
-    if head in ("quit", "exit"):
+    if head == "exit":
+        session.request_exit()
+        return "Back to the casino floor..."
+
+    if head == "quit":
         session.request_quit()
-        return "Quitting..."
+        return "Closing Baddie's Casino..."
 
     raise CommandError(f"Unknown command: '{head}' (try 'help')")
 

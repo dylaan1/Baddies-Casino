@@ -16,7 +16,13 @@ def main() -> None:
         "(it is created if it doesn't exist) -- the way to start with a clean slate without deleting anything",
     )
     args = parser.parse_args()
-    run(args.db.expanduser() if args.db else None)
+    db_path = args.db.expanduser() if args.db else None
+    if run(db_path) == "floor":
+        # 'exit' goes to the casino floor even when blackjack was started on
+        # its own -- and blackjack picked from there keeps this database.
+        from casino import floor
+
+        floor.run([floor.blackjack_game(db_path) if g.bank_key == "blackjack" else g for g in floor.GAMES])
 
 
 if __name__ == "__main__":
