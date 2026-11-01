@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Add the `casino` and `blackjack` shell aliases to ~/.zshrc (or the file
+given with --rc), pointing at this copy of Baddie's Casino:
+
+    python3 bin/install-aliases               # then open a new terminal, or: source ~/.zshrc
+    python3 bin/install-aliases --rc ~/.bashrc
+
+`casino` opens the casino floor and `blackjack` goes straight to the table,
+from any folder (they run bin/casino and bin/blackjack). The aliases live in
+one marked block, so running this again -- after moving the repository, say
+-- just updates that block. The file is backed up beside itself
+(<file>.bak-<timestamp>) whenever it changes, and nothing else in it is
+touched."""
+import argparse
+import os
+import re
+import shlex
+import shutil
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+BEGIN = "# >>> Baddie's Casino >>>"
+END = "# <<< Baddie's Casino <<<"
+NAMES = ("casino", "blackjack")
+_BLOCK = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?", re.S)
+
+
+def alias_block(repo: Path = REPO) -> str:
+    lines = [
+        BEGIN,
+        "# From any folder: `casino` opens the casino floor, `blackjack` goes straight to the table",
+        "# (`exit` there still takes you to the floor). Written by bin/install-aliases -- run it again to update.",
+    ]
+    for name in NAMES:
+        command = f"python3 {shlex.quote(str(repo / 'bin' / name))}"
+        lines.append(f"alias {name}={shlex.quote(command)}")
+    lines.append(END)
+    return "\n".join(lines) + "\n"
+
+
+def other_definitions(text: str) -> list:
+    """`casino` / `blackjack` defined somewhere outside the block (an alias or
+    a function) -- whichever comes later in the file wins."""
+    outside = _BLOCK.sub("", text)
+    found = []
+    for name in NAMES:
+        if re.search(rf"^\s*(alias\s+{name}=|(function\s+)?{name}\s*\(\s*\))", outside, re.M):
+            found.append(name)
+    return found
+
+
+def install(rc: Path, repo: Path = REPO) -> str:
+    """Put the alias block in `rc`; returns what happened, for printing."""
+    target = rc.resolve()  # a symlinked rc file (a dotfiles repo) is written through, not replaced
+    text = target.read_text(encoding="utf8") if target.exists() else ""
+    block = alias_block(repo)
+    if _BLOCK.search(text):
+        new = _BLOCK.sub(lambda _m: block, text, count=1)
+    else:
+        separator = "" if not text else ("\n" if text.endswith("\n") else "\n\n")
+        new = text + separator + block
+    notes = [f"note: {rc} also defines `{name}` outside the block" for name in other_definitions(text)]
+    if new == text:
+        return "\n".join([f"{rc} already has the Baddie's Casino aliases -- nothing to change."] + notes)
+
+    if target.exists():
+        backup = target.with_name(f"{target.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+        shutil.copy2(target, backup)
+        mode = target.stat().st_mode
+    else:
+        backup, mode = None, 0o644
+    tmp = target.with_name(target.name + ".tmp")
+    with open(tmp, "w", encoding="utf8") as fh:
+        fh.write(new)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.chmod(tmp, mode & 0o7777)
+    os.replace(tmp, target)
+    done = f"Added the `casino` and `blackjack` aliases to {rc}" + (f" (backup: {backup.name})" if backup else "")
+    return "\n".join([done] + notes)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="install-aliases", description=__doc__.split("\n\n")[0])
+    parser.add_argument("--rc", type=Path, default=Path.home() / ".zshrc", help="shell startup file (default: ~/.zshrc)")
+    args = parser.parse_args()
+    rc = args.rc.expanduser()
+    try:
+        print(install(rc))
+    except OSError as exc:
+        sys.exit(f"Couldn't update {rc}: {exc}")
+    print(f"Open a new terminal (or run: source {rc}) to use them.")
+
+
+if __name__ == "__main__":
+    main()

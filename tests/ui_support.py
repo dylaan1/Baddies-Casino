@@ -20,14 +20,14 @@ RIGHT, LEFT = "\x1bOC", "\x1bOD"
 
 
 class Game:
-    def __init__(self, home, rows=60, cols=220, args=(), cmd=None):
+    def __init__(self, home, rows=60, cols=220, args=(), cmd=None, cwd=None):
         self.rows, self.cols = rows, cols
         self.screen = pyte.Screen(cols, rows)
         self.stream = pyte.ByteStream(self.screen)
         self.raw = b""
         pid, fd = pty.fork()
         if pid == 0:  # child
-            os.chdir(REPO)
+            os.chdir(cwd or REPO)
             fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
             env = {"HOME": home, "TERM": "xterm-256color", "PATH": "/nonexistent",   # no audio player on PATH: stays silent
                    "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}

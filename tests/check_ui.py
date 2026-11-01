@@ -1,6 +1,7 @@
 """The real game, in a pseudo-terminal: deck-size rules and their messages, no hand lock, a genuine mid-hand
 reshuffle on screen, the data written when the game is quit or killed, and the casino floor (python3 -m casino)
--- its menus by keyboard and mouse, the bank options, and blackjack launched from it. Needs `pyte`
+-- its menus by keyboard and mouse, the bank options, and blackjack launched from it -- and both games started
+from another folder through the shell aliases' launchers (bin/casino, bin/blackjack). Needs `pyte`
 (pip install pyte); skipped without it. Takes a few minutes -- it types at human speed so the curses screen
 keeps up."""
 import importlib.util
@@ -17,7 +18,7 @@ if missing:
     print(f"check_ui: SKIPPED ({missing[0]} not available -- pip install pyte)")
     sys.exit(0)
 
-from ui_support import FORCED_LAUNCHER, LEFT, RIGHT, Game
+from ui_support import FORCED_LAUNCHER, LEFT, REPO, RIGHT, Game
 
 fails = []
 
@@ -315,6 +316,38 @@ sessions = c.execute("select count(*) from sessions where ended_at is not null")
 c.close()
 check(sessions == 2 and not os.path.exists(os.path.join(home, ".cs-blackjack", "blackjack.db")),
       "both visits played on the --db file (2 closed sessions there), never the default database")
+
+# =============================================================== G. the shell aliases' launchers, from another folder
+home = tempfile.mkdtemp(prefix="csbj-ui-alias-")
+here = tempfile.mkdtemp(prefix="csbj-ui-cwd-")
+g = Game(home, rows=60, cols=238, cmd=[sys.executable, str(REPO / "bin" / "blackjack"), "--db", "practice.db"], cwd=here)
+g.pump(2.5)
+check("Bankroll: $10,000.00" in g.text(), "`blackjack` (bin/blackjack) from another folder sits straight down at the table")
+g.send("\r", 4.0)
+g.to_idle()
+g.command("bank add 100", 1.0)
+check(g.line_with("Bankroll +$100.00") is not None, "...where in-game commands work as usual")
+g.command("exit", 3.0)
+check("Luxury Gaming and Amenities" in g.text(), "...and 'exit' goes to the casino floor")
+g.send("q", 1.0)
+check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "...which q closes")
+c = sqlite3.connect(os.path.join(here, "practice.db"))
+hands, table_pl = c.execute("select count(*), coalesce(sum(total_pl), 0) from hands").fetchone()
+ended = c.execute("select count(*) from sessions where ended_at is not null").fetchone()[0]
+c.close()
+check(hands >= 1 and ended == 1, "the session is logged as usual -- and the relative --db path meant the folder it was started in")
+bank = bank_file(home)
+check(abs(bank["game_winnings"]["blackjack"] - table_pl) < 1e-6 and abs(bank["deposited"] - 10_100) < 1e-9,
+      "the bank has the table's results as blackjack's winnings, and 'bank add 100' as a deposit")
+
+g = Game(home, rows=60, cols=238, cmd=[sys.executable, str(REPO / "bin" / "casino")], cwd=here)
+g.pump(2.5)
+check("Luxury Gaming and Amenities" in g.text() and f"Balance: ${bank['balance']:,.2f}" in g.text(),
+      "`casino` (bin/casino) from another folder opens the floor, on the same bank")
+g.send("\r", 3.5)
+check("Bankroll: $" in g.text(), "...where Classic Blackjack starts as usual")
+g.command("quit", 3.0)
+check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "...and 'quit' closes everything")
 
 print()
 print("check_ui: FAILED" if fails else "check_ui: ALL UI CHECKS PASSED", *fails, sep="\n  - " if fails else "")
