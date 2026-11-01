@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Sit straight down at the blackjack table from any folder -- what the
+`blackjack` shell alias runs (see bin/install-aliases). It's `python3 -m
+blackjack` from the repository root, without changing your folder: options
+and relative paths (`blackjack --db practice.db`) mean where you are. The
+session is the same one the casino floor starts -- logged, banked, and with
+`exit` going to the floor."""
+import sys
+from pathlib import Path
+
+# This repository first on the path (the folder you're in isn't on it at all,
+# so nothing there named casino or blackjack can be picked up instead).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from blackjack.__main__ import main  # noqa: E402
+
+main()

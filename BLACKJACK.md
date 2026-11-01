@@ -9,6 +9,26 @@ screen that every game is launched from:
 python3 -m casino
 ```
 
+### Shell aliases
+
+To start the casino, or go straight to a game, from any folder, add the
+`casino` and `blackjack` aliases to your shell:
+
+```bash
+python3 bin/install-aliases      # adds them to ~/.zshrc (--rc FILE for another shell's)
+source ~/.zshrc                  # or open a new terminal
+```
+
+Then `casino` opens the casino floor, and `blackjack` sits you straight down
+at the table. That's the same session the floor starts: logged and banked the
+same way, every command working as usual, and `exit` taking you to the floor.
+Both leave you in the folder you were in, so options mean what you'd expect
+there (`blackjack --db practice.db` uses `practice.db` in that folder). The
+aliases run `bin/casino` and `bin/blackjack`. They sit in one marked block in
+the file, so running the installer again (after moving the repository, say)
+updates that block in place, and the file is backed up beside itself first
+whenever it changes.
+
 Across the top runs the **BADDIE'S CASINO** sign, on one line, in lime-green
 block letters one and a half times their original size (the half rows are
 drawn with half blocks, `▀` and `▄`). It always keeps some room on either
@@ -602,10 +622,11 @@ Run it as a module from the repository root:
 python3 -m blackjack
 ```
 
-or pick it from the casino floor (`python3 -m casino`, see **The Casino
-Floor**). `exit` takes you to the floor, however you started; `quit` closes
-everything. The game maximizes your terminal window on launch. Your wagers and
-table rules are saved to `~/.cs-blackjack_state.json` and reloaded
+from any folder with the `blackjack` shell alias (see **Shell aliases**), or
+pick it from the casino floor (`python3 -m casino`, or `casino`; see **The
+Casino Floor**). `exit` takes you to the floor, however you started; `quit`
+closes everything. The game maximizes your terminal window on launch. Your
+wagers and table rules are saved to `~/.cs-blackjack_state.json` and reloaded
 automatically the next time you launch; your bankroll is the casino bank's
 (see **The Bank**). (Your data keeps the game's earlier
 name, `cs-blackjack`, so existing saves and history carry straight on.)
@@ -767,6 +788,8 @@ table, so there's no separate command to look them up.
 
 | File | Responsibility |
 |---|---|
+| `../bin/casino`, `../bin/blackjack` | Launchers the `casino` / `blackjack` shell aliases run: each game from any folder, without changing it |
+| `../bin/install-aliases` | Adds those aliases to `~/.zshrc` (or `--rc FILE`), in one marked, backed-up block |
 | `../casino/floor.py` | The casino floor (`python3 -m casino`, via `../casino/__main__.py`): the sign, the Games and Bank menus, launching a game |
 | `../casino/bank.py` | The casino bank: the shared bankroll in `~/.baddies-casino/bank.json` (atomic, locked writes; deposits, withdrawals, and winnings per game) |
 | `bank.py` | Blackjack's link to the casino bank: opening it, and carrying blackjack's old bankroll into it the first time |
@@ -805,11 +828,12 @@ CSBJ_FULL=1 python3 -m unittest discover -s tests   # also the mutation check an
 | `check_split_cap.py` | One split per hand on a single deck, and only there |
 | `check_history_reshuffle.py` | How the log records a round that ran the shoe dry (start shoe, the `reshuffled_mid_round` flag, the exact cards of both shoes), and upgrades of older database versions |
 | `check_stats_and_import.py` | Every lifetime and session figure comes from the database; the one-time import of an older game's stats (including negative figures); `newsession`, `bank reset`, and `--db` |
+| `check_launchers.py` | The shell aliases: the launchers from another folder (a same-named module there isn't picked up instead), and the installer (added once, updated in place, backed up, written through a symlink, the rest of the file untouched, the aliases working in zsh) |
 | `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, blackjack's bank commands and results landing in the right column, and the floor's menus, focus, clicks, and bank options |
 | `check_data_safety.py` | `export`, `backup`, `restore` (and rejecting bad backups), crash recovery, corrupt or newer files, atomic saves, and playing on with no database |
 | `check_locked_db.py` | Another program holding the database: nothing is dropped or mis-attributed, and it all lands, in order, once the lock lifts |
 | `check_audit.py` | Thousands of random rounds with the log attached, checked against ground truth: bankroll conservation, the casino bank getting exactly the table's P/L, the exact cards dealt, every stat against an independent implementation, the running counts |
-| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, and the casino floor by keyboard and mouse (blackjack launched from it, the bank options). Needs `pip install pyte`; skipped without it |
+| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, the casino floor by keyboard and mouse (blackjack launched from it, the bank options), and both games started from another folder through the aliases' launchers. Needs `pip install pyte`; skipped without it |
 | `tools/mutation_check.py` | Injects known bugs and confirms the checks above fail for each — a check that can't fail proves nothing |
 | `tools/consumption.py`, `tools/montecarlo.py`, `tools/adversary.py` | The measurements behind the minimum-cards floors: cards used per round, crash / failsafe rates per configuration over millions of rounds, and a search over every legal line of play (run them directly; `--help`-style usage is in each file's docstring) |
 
