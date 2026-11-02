@@ -4,7 +4,7 @@
 
 <p align="center">
 A full-screen casino for your terminal: walk onto the casino floor, pick a game, and play from one shared bankroll.<br>
-<b>Version 1.1.1</b> · <a href="https://github.com/dylaan1/Baddies-Casino/releases">Releases</a> · <a href="BLACKJACK.md">Full guide</a>
+<b>Version 1.1.2</b> · <a href="https://github.com/dylaan1/Baddies-Casino/releases">Releases</a> · <a href="BLACKJACK.md">Full guide</a>
 </p>
 
 ---
@@ -23,7 +23,7 @@ A full-screen casino for your terminal: walk onto the casino floor, pick a game,
 - [Where your data lives](#where-your-data-lives)
 - [Project layout](#project-layout)
 - [Testing](#testing)
-- [What's new in 1.1.1](#whats-new-in-111)
+- [What's new](#whats-new)
 - [License](#license)
 
 ## Quick start
@@ -213,7 +213,16 @@ touch your bank or history. The on-screen checks play the real game in a pseudo-
 package (`pip install pyte`); without it they're skipped. [BLACKJACK.md](BLACKJACK.md#testing) lists what
 each check proves.
 
-## What's new in 1.1.1
+## What's new
+
+### 1.1.2
+
+- **P/L by Dealer**: a new Data menu view of how you've done against each dealer, best first.
+- **Who dealt each session**, at the top of its detail in Historical Session Data.
+- **Every shoe and hand records its dealer** in blackjack's history. Shoes dealt since 1.1.1 get theirs
+  filled in automatically the first time 1.1.2 opens your history.
+
+### 1.1.1
 
 - **Baddie's Casino** (formerly CasinoSimulations): a casino floor to launch every game from, with a marquee,
   and Games, Bank, and Data menus.
