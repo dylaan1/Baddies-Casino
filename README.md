@@ -4,7 +4,7 @@
 
 <p align="center">
 A full-screen casino for your terminal: walk onto the casino floor, pick a game, and play from one shared bankroll.<br>
-<b>Version 1.1.1 (beta)</b> · <a href="https://github.com/dylaan1/Baddies-Casino/releases">Releases</a> · <a href="BLACKJACK.md">Full guide</a>
+<b>Version 1.1.1</b> · <a href="https://github.com/dylaan1/Baddies-Casino/releases">Releases</a> · <a href="BLACKJACK.md">Full guide</a>
 </p>
 
 ---
