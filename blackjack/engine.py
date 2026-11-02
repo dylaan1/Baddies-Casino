@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 from .cards import Card, Shoe, hilo_value
 from .dealer import play_dealer_hand
+from .dealers import REST_ROTATIONS, SHOES_PER_DEALER, next_dealer
 from .hand import Hand
 from .history import HistoryError
 from .rules import (
@@ -192,7 +193,19 @@ class GameSession:
         # session starts, a shoe is cut, or a round is recorded. Without a
         # database it just stays all zeros.
         self.stats = Stats()
+        # How many shoes this session has cut, counting the current one (the
+        # table alternates red- and blue-backed decks shoe by shoe).
+        self.shoe_number = 0
+        # The dealer (see blackjack/dealers.py): a new one every session and
+        # every SHOES_PER_DEALER shoes -- counted from the session's start,
+        # which `newsession` and a restore reset (shoe_number carries on).
+        # dealer_announced is False from a change until the screen has
+        # flashed NEW DEALER for it; a session's first dealer just appears.
+        self.dealer: Optional[str] = None
+        self.dealer_announced = True
+        self._session_shoes = 0
         self.shoe = self._new_shoe()
+        self.dealer_announced = True
         self._enforce_sidebet_deck_gate()
         self.active_rules = ActiveTableRules(rules.blackjack_payout, rules.hit_soft_17)
         self.wagers: List[float] = list(wagers) if wagers else [rules.default_bet, 0.0, 0.0]
@@ -314,11 +327,23 @@ class GameSession:
         switch to one deck)."""
         if self.rules.num_decks == 1:
             self.rules.num_hands = min(self.rules.num_hands, SINGLE_DECK_MAX_HANDS)
+        self.shoe_number += 1
+        self._session_shoes += 1
+        if (self._session_shoes - 1) % SHOES_PER_DEALER == 0:
+            self.rotate_dealer()
         return Shoe(
             self.rules.num_decks,
             self._target_penetration(self.rules.num_decks),
             min_cards_left=self._min_cards_left(self.rules.num_decks),
         )
+
+    def rotate_dealer(self) -> None:
+        """Hand the table to the next dealer (see dealers.next_dealer)."""
+        name = next_dealer(self.rules.dealers, self.rules.recent_dealers)
+        self.dealer = name
+        if name is not None:
+            self.rules.recent_dealers = (self.rules.recent_dealers + [name])[-REST_ROTATIONS:]
+        self.dealer_announced = False
 
     def split_hand_limit(self) -> int:
         """Most hands one spot can split into right now: the 'splitmax' rule,
@@ -419,6 +444,7 @@ class GameSession:
         start over because the new session has no hands yet."""
         if self.history is not None and self.history.end_session(self, reason):
             self.history.start_session(self)  # (if the old one couldn't be closed -- database busy -- the log just carries on in it)
+        self._session_shoes = 0  # a new session: a new dealer with its first shoe
         self.reset_shoe(reason)
 
     def restore_backup(self, name: str) -> Optional[str]:
@@ -437,6 +463,7 @@ class GameSession:
         self.wagers = wagers
         self.side_bet_wagers = side_bet_wagers
         self.history.start_session(self)
+        self._session_shoes = 0  # a new session: a new dealer with its first shoe
         self.reset_shoe("restore")
         return None
 

@@ -4,6 +4,7 @@ import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
+from . import dealers
 from .history import BACKUP_DIR, EXPORT_DIR, EXPORT_FORMATS, EXPORT_TABLES, HistoryError
 from .rules import (
     DOUBLE_DECK_MAX_PENETRATION,
@@ -63,6 +64,11 @@ HELP_LINES = [
     "  newshoe                        Reshuffle a fresh shoe (RETURN confirms)",
     "  newsession                     Reset shoe + session stats, bankroll untouched (RETURN confirms)",
     "",
+    "DEALERS  (a new one every session and every 6 shoes; none deals twice in 3 rotations)",
+    "  dealers                        The roster: who's dealing, who's sitting out",
+    "  hire NAME                      Add a dealer to the rotation",
+    "  fire NAME                      Let a dealer go (at least 3 stay; the one dealing goes between rounds)",
+    "",
     "DATA & BACKUPS  (history database: ~/.cs-blackjack/blackjack.db)",
     "  export [hands|sessions|shoes|stats|all] [csv|json]   Write history to ~/.cs-blackjack/exports/",
     "  export mysql                   Write the whole history database as a MySQL .sql script",
@@ -111,6 +117,12 @@ def handle_command(raw: str, session: "GameSession", round_in_progress: bool = F
     raw = raw.strip()
     if not raw:
         return ""
+    word, _, name = raw.partition(" ")
+    if word.lower() in ("hire", "fire"):  # (a name keeps the capitals it's typed with)
+        try:
+            return _staff_command(word.lower(), name, session, round_in_progress)
+        except (CommandError, ValueError) as exc:
+            return str(exc)
     try:
         tokens = shlex.split(raw.lower())
     except ValueError as exc:
@@ -123,6 +135,44 @@ def handle_command(raw: str, session: "GameSession", round_in_progress: bool = F
         return _dispatch(head, rest, session, round_in_progress, round_open)
     except (CommandError, HistoryError) as exc:
         return str(exc)
+
+
+def _staff_command(word: str, name: str, session: "GameSession", round_in_progress: bool) -> str:
+    """'hire NAME' and 'fire NAME' (see blackjack/dealers.py)."""
+    roster = session.rules.dealers
+    if word == "hire":
+        name = dealers.clean_name(name)
+        if dealers.find(roster, name) is not None:
+            raise CommandError(f"{dealers.find(roster, name)} is already on the roster.")
+        roster.append(name)
+        return f"Hired {name}: {len(roster)} dealers in the rotation."
+    if not name.strip():
+        raise CommandError("Usage: fire NAME")
+    found = dealers.find(roster, name)
+    if found is None:
+        raise CommandError(f"No dealer named '{' '.join(name.split())}' -- the roster is {', '.join(roster)}.")
+    if len(roster) <= dealers.MIN_DEALERS:
+        raise CommandError(f"The rotation needs at least {dealers.MIN_DEALERS} dealers -- hire someone before letting {found} go.")
+    on_duty = session.dealer is not None and session.dealer.casefold() == found.casefold()
+    if on_duty and round_in_progress:
+        raise CommandError(f"{found} is dealing this round -- finish it first.")
+    roster.remove(found)
+    if on_duty:
+        session.rotate_dealer()
+        return f"Fired {found}. {session.dealer} takes over the table."
+    return f"Fired {found}: {len(roster)} dealers in the rotation."
+
+
+def _dealers_summary(session: "GameSession") -> str:
+    roster = session.rules.dealers
+    dealing = session.dealer
+    resting = [n for n in session.rules.recent_dealers if n != dealing and dealers.find(roster, n)]
+    text = f"Dealers ({len(roster)}): {', '.join(roster)}."
+    if dealing:
+        text += f"  Dealing: {dealing}."
+    if resting:
+        text += f"  Sitting out: {', '.join(resting)}."
+    return text
 
 
 def _require(rest: List[str], index: int, usage: str) -> str:
@@ -157,6 +207,9 @@ def _dispatch(
     head: str, rest: List[str], session: "GameSession", round_in_progress: bool = False, round_open: bool = False
 ) -> str:
     rules = session.rules
+
+    if head == "dealers":
+        return _dealers_summary(session)
 
     if head == "das":
         rules.das = _parse_bool_on_off(_require(rest, 0, "das on/off"))

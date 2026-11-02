@@ -167,6 +167,8 @@ check(msg == "Playing 2 hand(s) per round", "...and fewer hands never does")
 ui_s = new(1)
 check("1 DECK  •  54%" in ui.rules_summary(ui_s), f"the header shows the real depth: {ui.rules_summary(ui_s)[:28]}")
 check("2 DECK  •  80%" in ui.rules_summary(new(2, penetration=0.95)), "...80% for two decks")
+check(ui.rules_summary(new(2, penetration=0.95)).endswith("•  3:2  •  S17  •  LATE SURRENDER  •  DAS  •  NO RSA"),
+      f"every game rule is on that line, the payout and soft 17 just tagged (the felt prints them in full): {ui.rules_summary(new(2, penetration=0.95))}")
 
 # ---- hands: no lock, capped at 2 on a single deck
 s = make_session = S.make_session(1, 1)
