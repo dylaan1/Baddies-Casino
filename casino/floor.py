@@ -221,7 +221,7 @@ FOOTER = "↑↓ choose   ←→ switch side   Tab next menu   Enter select   cl
 SHORT_FOOTER = "↑↓ choose  ←→ side  Tab menu  Enter select  q leave"  # for a window too narrow for FOOTER
 NOTICE = (
     "Intellectual Property of Dylan Behseresht, 2026. Any unauthorized redistribution of this software without "
-    "express written consent is expressly prohibited"
+    "express written consent is expressly prohibited."
 )
 
 Rect = Tuple[int, int, int, int]  # (y, x, height, width)
