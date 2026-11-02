@@ -16,6 +16,7 @@ import pyte
 
 REPO = Path(__file__).resolve().parent.parent
 FORCED_LAUNCHER = Path(__file__).resolve().parent / "forced_launcher.py"
+SEEDED_LAUNCHER = Path(__file__).resolve().parent / "seeded_launcher.py"
 RIGHT, LEFT = "\x1bOC", "\x1bOD"
 
 
@@ -105,8 +106,8 @@ class Game:
     def wager_row(self):
         """The three wager cells of the betting grid as strings, or None."""
         for line in self.text().splitlines():
-            clean = re.sub(r"[│┌┐└┘─]", " ", line)
-            m = re.search(r"(?<![\d.$,])(\d[\d.]*)\s+♦\s+(\d[\d.]*)\s+♦\s+(\d[\d.]*)(?![\d.])", clean)
+            clean = re.sub(r"[│┌┐└┘─╭╮╰╯()░▒▄▀▌▐▖▗▘▝]", " ", line).replace("▼", "0")   # box edges, the spots' shading, card edges; ▼ is a $0 wager
+            m = re.search(r"(?<![\d.$,])(\d[\d.,]*)\s+[♦▓]\s+(\d[\d.,]*)\s+[♦▓]\s+(\d[\d.,]*)(?![\d.,])", clean)
             if m and "$" not in clean:
                 return tuple(m.groups())
         return None

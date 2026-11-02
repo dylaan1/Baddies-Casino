@@ -21,6 +21,7 @@ from .engine import (
     initial_deal_sequence,
     try_start_round,
 )
+from .dealers import REST_ROTATIONS, SHOES_PER_DEALER
 from .hand import Hand
 from .history import HistoryDB
 from .rules import (
@@ -160,31 +161,36 @@ STATS_SCREEN_TABLE_GAP = 8
 STATS_ROW_MIN_WIDTH = (
     (PAYOUT_COL_W * 3 + PAYOUT_GAP * 2) + 4 + STATS_MIN_COL_W * 4 + STATS_INNER_GAP * 2 + STATS_TABLE_GAP
 )
+# The header bars' text and everything below the table (the CLI, the stats
+# panel) run out toward the rail: this many columns in from the screen's edge
+# (the rail, then two columns of breathing room). The table keeps MARGIN_COLS.
+EDGE_PAD = 3
 MIN_COLS = max(
     2 * MARGIN_COLS + MIN_COL_WIDTH * NUM_SPOT_COLUMNS + DIVIDER_COLS,
-    2 * MARGIN_COLS + STATS_ROW_MIN_WIDTH,
+    2 * EDGE_PAD + STATS_ROW_MIN_WIDTH,
 )
 
 # ---- Vertical content budget ----
-# Rows, top to bottom: title(1) + rules-summary/card-count/bankroll
-# banner(1) + table-status/running-true banner(1) + divider(1, also the
-# dealer box's top border) + dealer value(1) + dealer cards(CARD_BLOCK_HEIGHT
-# + DEALER_STACK_DY -- the extra row is the hole card's peek, past the
-# up-card's own footprint, while it's still stacked pre-reveal) + dealer
-# BUST/BLACKJACK banner(1) + dealer box bottom border(1) + buffer(1) + split-hand chips
-# row(1) + player cards(CARD_BLOCK_HEIGHT) + active value / prelim-prompt
-# row(1) + main-bet settlement banner row(1) + main wager box(3) +
-# side-bet boxes(3) (each bet's own name doubles as its header, so no
-# separate title row) + side-bet banner: winning label(s)(1) + combined
-# total(1) + overflow-ticker row(1) + divider(1, closes out the table
-# section and puts the CLI in its own section below) + hint/message(1) +
-# blank(1) + input(1) + blank(1) + divider(1) + stats/payout header(1) +
-# stats/payout rows(STATS_BLOCK_ROWS).
-CONTENT_HEIGHT = (
-    1 + 1 + 1 + 1 + 1 + 1 + CARD_BLOCK_HEIGHT + DEALER_STACK_DY
-    + 1 + 1 + 1 + CARD_BLOCK_HEIGHT + 1 + 1 + 3 + 3 + 1 + 1 + 1
-    + 1 + 1 + 1 + 1 + 1 + 1 + 1 + STATS_BLOCK_ROWS
+# The table, drawn on felt, top to bottom: the dealer's crease's top border
+# (1) + dealer value(1) + dealer cards(CARD_BLOCK_HEIGHT + DEALER_STACK_DY --
+# the extra row is the hole card's peek, past the up-card's own footprint,
+# while it's still stacked pre-reveal) + dealer BUST/BLACKJACK banner(1) +
+# the crease's bottom border(1) + the rules line(1) + split-hand chips row(1)
+# + player cards(CARD_BLOCK_HEIGHT) + active value / prelim-prompt row(1) +
+# main-bet settlement banner row(1) + main wager spot(3) + side-bet spots(3)
+# (each bet's own name doubles as its header, so no separate title row) +
+# side-bet banner: winning label(s)(1) + combined total(1) + overflow-ticker
+# row(1).
+FELT_ROWS = (
+    1 + 1 + CARD_BLOCK_HEIGHT + DEALER_STACK_DY + 1 + 1 + 1 + 1 + CARD_BLOCK_HEIGHT + 1 + 1 + 3 + 3 + 1 + 1 + 1
 )
+# The whole screen: title(2: "Baddie's Casino™" over "Blackjack") + gold
+# divider(1) + rules-summary/card-count/bankroll banner(1) + table-status/
+# running-true banner(1) + the felt(FELT_ROWS) + gold divider(1, closes out
+# the table and puts the CLI in its own section below) + hint/message(1) +
+# blank(1) + input(1) + blank(1) + stats/payout header(1) + stats/payout
+# rows(STATS_BLOCK_ROWS).
+CONTENT_HEIGHT = 2 + 1 + 1 + 1 + FELT_ROWS + 1 + 1 + 1 + 1 + 1 + 1 + STATS_BLOCK_ROWS
 # +2 reserves the top/bottom rows of the border frame around the whole
 # window (see _draw_window_border) -- content is inset 1 row inside it.
 MIN_LINES = CONTENT_HEIGHT + 2
@@ -239,13 +245,35 @@ NEW_SHOE_MESSAGE_PREFIXES = (
 )
 NEW_SHOE_MESSAGE_DISPLAY_SECONDS = 2.0
 
-CARD_BACK = [
-    "┌─────┐",
-    "│▒▒▒▒▒│",
-    "│▒▒▒▒▒│",
-    "│▒▒▒▒▒│",
-    "└─────┘",
-]
+# A card is solid white, and a back a white-edged colored lattice, like a
+# standard red- or blue-backed deck (the table alternates the two by shoe).
+# A card's edge cells are split down the middle: the inner half is the card's
+# white, the outer half its shadow -- so the face ends square, half a cell in,
+# with the shadow right up against it (and between fanned cards).
+CARD_EDGE_TOP = "▗" + "▄" * (CARD_W - 2) + "▖"
+CARD_EDGE_BOTTOM = "▝" + "▀" * (CARD_W - 2) + "▘"
+CARD_EDGE_LEFT, CARD_EDGE_RIGHT = "▐", "▌"
+CARD_BACK_ROWS = ["╳" * (CARD_W - 2)] * (CARD_H - 2)
+
+# The dealer's crease: a ▓ border round a ░ felt-grain fill, with a clear
+# strip of plain felt behind any text on it.
+CREASE_EDGE = "▓"
+CREASE_FILL = "░"
+SPOT_DIVIDER = "▓"  # between the player spots' wager blocks, matching the crease's sides
+TABLE_MARGIN = "▓"  # the felt either side of the table, out to the rail, matching the crease
+# The dealer's peek, mid-way along the crease's top border: five cells of
+# gray on an odd-width border, six on an even one -- the middle one or two
+# darker -- so it sits dead center either way.
+PEEK_SHADE, PEEK_DARK = "▒", "▓"
+
+
+def peek_cells(border_w: int) -> Tuple[int, str]:
+    """Where the peek starts along a border `border_w` cells wide, and its
+    cells: '▒▒▓▒▒' (odd) or '▒▒▓▓▒▒' (even)."""
+    width, dark = (5, 1) if border_w % 2 else (6, 2)
+    side = PEEK_SHADE * ((width - dark) // 2)
+    return (border_w - width) // 2, side + PEEK_DARK * dark + side
+
 
 # (true count, 1:10 spread, 1:12 spread, 1:15 spread) reference tables.
 BET_SPREAD_TABLES: List[Tuple[str, List[Tuple[str, str, str, str]]]] = [
@@ -280,6 +308,33 @@ BET_SPREAD_TABLES: List[Tuple[str, List[Tuple[str, str, str, str]]]] = [
 CellRects = Dict[Union[str, Tuple[int, int]], Tuple[int, int, int, int]]
 
 
+# Where this frame's felt is -- (top row, bottom row, left column, right
+# column), inclusive -- and the card backs' color, both set by render().
+# Anything drawn on the felt in a color with no background of its own (plain
+# text, red/white/blue) gets that color's felt twin instead (FELT_TWINS, set
+# up in init_colors), so it sits on the felt rather than punching a hole in it.
+_felt: Optional[Tuple[int, int, int, int]] = None
+# The spot being played sits on brighter felt -- a region inside _felt, with
+# its own twins (BRIGHT_TWINS).
+_bright: Optional[Tuple[int, int, int, int]] = None
+_card_back_pair = 0
+FELT_TWINS: Dict[int, int] = {}
+BRIGHT_TWINS: Dict[int, int] = {}
+
+
+def _within(rect: Optional[Tuple[int, int, int, int]], y: int, x: int) -> bool:
+    return rect is not None and rect[0] <= y <= rect[1] and rect[2] <= x <= rect[3]
+
+
+def _on_felt(y: int, x: int, attr: int) -> int:
+    twins = BRIGHT_TWINS if _within(_bright, y, x) else (FELT_TWINS if _within(_felt, y, x) else None)
+    if twins:
+        twin = twins.get(curses.pair_number(attr & curses.A_COLOR))
+        if twin is not None:
+            return (attr & ~curses.A_COLOR) | curses.color_pair(twin)
+    return attr
+
+
 def _safe_addstr(win, y: int, x: int, text: str, attr: int = 0) -> None:
     max_y, max_x = win.getmaxyx()
     if y < 0 or y >= max_y or x >= max_x:
@@ -288,7 +343,7 @@ def _safe_addstr(win, y: int, x: int, text: str, attr: int = 0) -> None:
     if available <= 0:
         return
     try:
-        win.addstr(y, x, text[:available], attr)
+        win.addstr(y, x, text[:available], _on_felt(y, x, attr))
     except curses.error:
         pass
 
@@ -306,31 +361,46 @@ def _center_x_right_bias(text: str, width: int, origin: int = 0) -> int:
 
 
 def _draw_window_border(win, max_y: int, max_x: int) -> None:
-    """A single-line box frame around the whole window. The bottom-right
-    corner cell is the one spot curses refuses a normal addstr() into (it
-    can't advance the cursor past it), so that one character goes in with
-    insstr() instead, which writes without moving the cursor."""
+    """The table's rail: a gold double-line frame around the whole window.
+    The bottom-right corner cell is the one spot curses refuses a normal
+    addstr() into (it can't advance the cursor past it), so that one
+    character goes in with insstr() instead, which writes without moving
+    the cursor."""
     if max_y < 2 or max_x < 2:
         return
+    rail = curses.color_pair(RAIL_PAIR) | curses.A_BOLD
     try:
-        win.addstr(0, 0, "┌" + "─" * (max_x - 2) + "┐")
+        win.addstr(0, 0, "╔" + "═" * (max_x - 2) + "╗", rail)
     except curses.error:
         pass
     for row in range(1, max_y - 1):
         try:
-            win.addstr(row, 0, "│")
+            win.addstr(row, 0, "║", rail)
         except curses.error:
             pass
         try:
-            win.insstr(row, max_x - 1, "│")
+            win.insstr(row, max_x - 1, "║", rail)
         except curses.error:
             pass
     try:
-        win.addstr(max_y - 1, 0, "└" + "─" * (max_x - 2))
+        win.addstr(max_y - 1, 0, "╚" + "═" * (max_x - 2), rail)
     except curses.error:
         pass
     try:
-        win.insstr(max_y - 1, max_x - 1, "┘")
+        win.insstr(max_y - 1, max_x - 1, "╝", rail)
+    except curses.error:
+        pass
+
+
+def _draw_gold_divider(win, y: int, max_x: int) -> None:
+    """A gold double line across the window, joined to the rail at both ends."""
+    rail = curses.color_pair(RAIL_PAIR) | curses.A_BOLD
+    try:
+        win.addstr(y, 0, "╠" + "═" * (max_x - 2), rail)
+    except curses.error:
+        pass
+    try:
+        win.insstr(y, max_x - 1, "╣", rail)
     except curses.error:
         pass
 
@@ -364,25 +434,25 @@ def _card_color(card: Card) -> int:
 
 
 def draw_card(win, y: int, x: int, card: Optional[Card], face_down: bool = False) -> None:
+    """One card, CARD_W x CARD_H: a white face (black or red rank and suit)
+    or a back (this shoe's red or blue lattice, white-edged), squared off
+    half a cell in from its footprint, its dark shadow in the outer half (see
+    CARD_EDGE_TOP). A card fanned over another casts that shadow on it: a
+    dark line between the two."""
+    edge = curses.color_pair(CARD_EDGE_PAIR)
     if face_down or card is None:
-        for i, line in enumerate(CARD_BACK):
-            _safe_addstr(win, y + i, x, line, curses.color_pair(3))
-        return
-
-    rank = card.short_rank
-    glyph = card.glyph
-    tag = f"{rank}{glyph}"
-    color = _card_color(card)
-
-    lines = [
-        "┌─────┐",
-        f"│{tag:<5}│",
-        f"│{glyph:^5}│",
-        f"│{tag:>5}│",
-        "└─────┘",
-    ]
-    for i, line in enumerate(lines):
-        _safe_addstr(win, y + i, x, line, color)
+        rows, face = CARD_BACK_ROWS, curses.color_pair(_card_back_pair)
+    else:
+        tag = f"{card.short_rank}{card.glyph}"
+        inner = CARD_W - 2
+        rows = [f"{tag:<{inner}}", f"{card.glyph:^{inner}}", f"{tag:>{inner}}"]
+        face = curses.color_pair(CARD_RED_PAIR if card.is_red else CARD_BLACK_PAIR) | curses.A_BOLD
+    _safe_addstr(win, y, x, CARD_EDGE_TOP, edge)
+    for i, row in enumerate(rows, start=1):
+        _safe_addstr(win, y + i, x, CARD_EDGE_LEFT, edge)
+        _safe_addstr(win, y + i, x + 1, row, face)
+        _safe_addstr(win, y + i, x + CARD_W - 1, CARD_EDGE_RIGHT, edge)
+    _safe_addstr(win, y + CARD_H - 1, x, CARD_EDGE_BOTTOM, edge)
 
 
 def _card_block_width(hand: Hand, max_cards: Optional[int] = MAX_CARDS_IN_GRID) -> int:
@@ -544,26 +614,52 @@ def rules_summary(session: GameSession) -> str:
     # the *next* shoe (session.rules may already differ -- see
     # GameSession.has_pending_rule_changes and the "* Rule Changes
     # Pending *" flag drawn alongside this line in render()).
+    # The payout and soft-17 rules are printed in full on the felt (see
+    # felt_rules), so this line just tags them: 3:2 or 6:5, S17 or H17. The
+    # surrender, DAS and RSA rules apply as soon as they're changed.
     shoe = session.shoe
     active = session.active_rules
-    soft17 = "HITS" if active.hit_soft_17 else "STANDS"
-    return (
-        f"{shoe.num_decks} DECK  •  {shoe.effective_penetration:.0%}  •  "
-        f"BJ PAYS {format_blackjack_payout(active.blackjack_payout)}  •  DEALER {soft17} ON SOFT 17"
-    )
-
-
-def table_status_summary(session: GameSession) -> str:
     r = session.rules
-    range_text = (
-        f"MIN: ${r.table_min:,.0f}  –  MAX: ${r.table_max:,.0f}"
-        if r.table_min > 0
-        else f"MAX: ${r.table_max:,.0f}"
-    )
+    soft17 = "H17" if active.hit_soft_17 else "S17"
     surr = {"off": "NO SURRENDER", "early": "EARLY SURRENDER", "late": "LATE SURRENDER"}[r.surrender]
     das = "DAS" if r.das else "NO DAS"
     rsa = "RSA" if r.rsa else "NO RSA"
-    return f"{range_text}  •  {surr}  •  {das}  •  {rsa}"
+    return (
+        f"{shoe.num_decks} DECK  •  {shoe.effective_penetration:.0%}  •  "
+        f"{format_blackjack_payout(active.blackjack_payout)}  •  {soft17}  •  {surr}  •  {das}  •  {rsa}"
+    )
+
+
+def _bet_range(lo: float, hi: float) -> str:
+    return f"Min ${lo:,.0f} – Max ${hi:,.0f}"
+
+
+def _bet_range_short(lo: float, hi: float) -> str:
+    return f"${lo:,.0f}–${hi:,.0f}"
+
+
+def table_status_summary(session: GameSession, width: Optional[int] = None) -> str:
+    """The table's limits: the main bet's, then the side bets' -- as one
+    range when every side bet in play shares it, else bet by bet. Given a
+    `width` the full wording doesn't fit in, the ranges shorten to
+    "$5–$100"."""
+    r = session.rules
+    bets = [(SIDE_BET_LABELS[k], getattr(r, k)) for k in ("power_poker", "star21", "dealer_buster") if getattr(r, k).enabled]
+    text = ""
+    for rng in (_bet_range, _bet_range_short):
+        table = f"TABLE: {rng(r.table_min, r.table_max)}"
+        if not bets:
+            side = "No Side Bets"
+        elif len({(b.min_bet, b.max_bet) for _, b in bets}) == 1:
+            names = " & ".join(name for name, _ in bets)
+            who = "All Side Bets are" if len(bets) == 3 else f"{names} {'is' if len(bets) == 1 else 'are'}"
+            side = f"{who} {rng(bets[0][1].min_bet, bets[0][1].max_bet)}"
+        else:
+            side = "  •  ".join(f"{name} {rng(b.min_bet, b.max_bet)}" for name, b in bets)
+        text = f"{table}  •  {side}"
+        if width is None or len(text) <= width:
+            break
+    return text
 
 
 def _net_return(round_: Round) -> float:
@@ -706,11 +802,125 @@ def sidebet_stats_tables(
     return tables
 
 
-def _draw_box(win, y: int, x: int, width: int, dim: bool = False) -> None:
-    attr = curses.A_DIM if dim else 0
-    _safe_addstr(win, y, x, "┌" + "─" * (width - 2) + "┐", attr)
-    _safe_addstr(win, y + 1, x, "│" + " " * (width - 2) + "│", attr)
-    _safe_addstr(win, y + 2, x, "└" + "─" * (width - 2) + "┘", attr)
+def felt_rules(session: GameSession) -> str:
+    """The rules printed on the felt, as the shoe in play deals them (a
+    change made for the next shoe shows once it's cut)."""
+    active = session.active_rules
+    payout = format_blackjack_payout(active.blackjack_payout).replace(":", " TO ")
+    soft17 = "HITS" if active.hit_soft_17 else "STANDS"
+    return f"BLACKJACK PAYS {payout}  ·  DEALER {soft17} ON SOFT 17  ·  INSURANCE PAYS 2 TO 1"
+
+
+SHOE_W = 30  # the shoe's and the tray's inside, in columns
+SHOE_ROWS = 2  # ... and in rows
+
+
+def shoe_gauge(total: int, remaining: int, cut_remaining: int, width: int = SHOE_W) -> Tuple[int, Optional[int]]:
+    """How the shoe looks across `width` columns, front (the dealer's end)
+    first: how many columns its remaining cards fill, and the column the cut
+    card sits at -- the cards in front of it are what's left to deal before
+    the shuffle (None once it's been reached)."""
+    stack = round(width * remaining / total) if total else 0
+    if remaining == 0:
+        stack = 0
+    elif stack == 0:
+        stack = 1
+    ahead = remaining - cut_remaining
+    if ahead <= 0:
+        return stack, None
+    return stack, min(stack - 1, max(0, round(width * ahead / total)))
+
+
+def _draw_card_box(win, y: int, x: int, title: str, fill: int, cut: Optional[int], front_left: bool) -> None:
+    """A shoe or discard tray: a dark box with a stack of cards in this
+    shoe's back color (each column a card edge), filled `fill` columns from
+    its front -- the left on the shoe, the right on the tray, the ends
+    nearest the dealer -- with a yellow cut card at column `cut`."""
+    # (the frame: a gray half-cell band hugging the box, its corners rounded
+    # with quarter blocks)
+    frame = curses.color_pair(SHOE_EDGE_PAIR)
+    _safe_addstr(win, y, x + 1, title, curses.color_pair(SHOE_FRAME_PAIR) | curses.A_BOLD)
+    _safe_addstr(win, y + 1, x, "▗" + "▄" * SHOE_W + "▖", frame)
+    for row in range(SHOE_ROWS):
+        line_y = y + 2 + row
+        _safe_addstr(win, line_y, x, "▐", frame)
+        _safe_addstr(win, line_y, x + 1, " " * SHOE_W, curses.color_pair(SHOE_EMPTY_PAIR))
+        start = x + 1 if front_left else x + 1 + SHOE_W - fill
+        _safe_addstr(win, line_y, start, "│" * fill, curses.color_pair(_card_back_pair))
+        if cut is not None:
+            cut_x = x + 1 + cut if front_left else x + SHOE_W - cut
+            _safe_addstr(win, line_y, cut_x, "█", curses.color_pair(CUT_CARD_PAIR))
+        _safe_addstr(win, line_y, x + SHOE_W + 1, "▌", frame)
+    _safe_addstr(win, y + 2 + SHOE_ROWS, x, "▝" + "▀" * SHOE_W + "▘", frame)
+
+
+def draw_shoe_and_tray(win, session: GameSession, round_: Optional[Round], y: int, tray_x: int, shoe_x: int) -> None:
+    """The dealing shoe at the dealer's side of the table -- the right, as
+    the players see it -- emptying as it's dealt, its yellow cut card coming
+    up toward the front, and the discard tray on the left, filling as each
+    round is cleared away: between them, how far into the shoe the game is."""
+    shoe = session.shoe
+    total = shoe.total_cards
+    on_table = len(round_.drawn) if round_ is not None else 0
+    discards = max(0, shoe.cards_dealt - on_table)
+    cut_remaining = total - round(shoe.effective_penetration * total)
+    stack, cut = shoe_gauge(total, shoe.cards_remaining, cut_remaining)
+    _draw_card_box(win, y, shoe_x, f"SHOE  {shoe.cards_remaining} cards · {shoe.cards_remaining / 52:.1f} decks",
+                   stack, cut, front_left=True)
+    tray = round(SHOE_W * discards / total) if total else 0
+    _draw_card_box(win, y, tray_x, f"DISCARDS  {discards} cards · {discards / 52:.1f} decks",
+                   tray if discards == 0 or tray else 1, None, front_left=False)
+
+
+SPOT_SHADE = "░"
+
+
+def _draw_spot(win, y: int, x: int, width: int, shade_attr: int) -> None:
+    """A betting spot printed on the felt, three rows tall: a patch of light
+    shade in the spot's color, no border, its corners left as felt to round
+    it off. Whatever's written on it sits on a solid chip of its own."""
+    _safe_addstr(win, y, x + 1, SPOT_SHADE * (width - 2), shade_attr)
+    _safe_addstr(win, y + 1, x, SPOT_SHADE * width, shade_attr)
+    _safe_addstr(win, y + 2, x + 1, SPOT_SHADE * (width - 2), shade_attr)
+
+
+WAGER_EDGE = "▒"  # the main wager's spot: a rectangle, mid shade round its edge...
+WAGER_FILL = "░"  # ...and light shade inside, round the chip
+ZERO_WAGER = "▼"  # a main wager of 0, in place of "0"
+
+
+def _draw_wager_spot(win, y: int, x: int, width: int, shade_attr: int) -> None:
+    """The main wager's spot: a three-row rectangle of the spot's color, mid
+    shade all round its edge and light shade along the middle, where the
+    chip sits."""
+    _safe_addstr(win, y, x, WAGER_EDGE * width, shade_attr)
+    _safe_addstr(win, y + 1, x, WAGER_EDGE + WAGER_FILL * (width - 2) + WAGER_EDGE, shade_attr)
+    _safe_addstr(win, y + 2, x, WAGER_EDGE * width, shade_attr)
+
+
+def _chip_text(text: str, width: int) -> str:
+    """Text as it sits on its chip: a space either side, where there's room."""
+    return f" {text} " if len(text) + 2 <= width else text
+
+
+# Casino chip colors, by the biggest chip an amount reaches: (from, pair).
+CHIP_COLORS = (
+    (5000, "orange"),
+    (1000, "yellow"),
+    (500, "purple"),
+    (100, "black"),
+    (25, "green"),
+    (5, "red"),
+    (0.01, "white"),
+)
+
+
+def chip_pair(amount: float) -> Optional[int]:
+    """The color pair of the chip an amount's shown on, or None for $0."""
+    for floor, name in CHIP_COLORS:
+        if amount >= floor:
+            return CHIP_PAIRS[name]
+    return None
 
 
 def _draw_wager_cell(
@@ -728,28 +938,24 @@ def _draw_wager_cell(
     dim: bool = False,
 ) -> None:
     is_focused = betting and input_focus == "wager" and bet_row == 0 and bet_col == col
+    if round_ is not None and col < len(round_.spots):
+        amount = sum(h.bet for h in round_.spots[col].hands)
+    else:
+        amount = session.wagers[col]
     if is_focused and bet_edit_buffer:
         text = bet_edit_buffer
-    elif round_ is not None and col < len(round_.spots):
-        text = _wager_text(sum(h.bet for h in round_.spots[col].hands))
     else:
-        text = _wager_text(session.wagers[col])
-    _draw_box(win, box_y, box_x, MAIN_WAGER_BOX_W, dim=dim)
-    attr = curses.A_REVERSE if is_focused else (curses.A_DIM if dim else 0)
-    _safe_addstr(win, box_y + 1, _center_x_right_bias(text, MAIN_WAGER_BOX_W - 2, box_x + 1), text, attr)
-
-
-def _draw_colored_box(win, y: int, x: int, width: int, attr: int) -> None:
-    """Like _draw_box, but the cell's INTERIOR -- never its border -- is
-    filled with a color pair, for a side bet's themed wager cell. The
-    frame itself is drawn in the default terminal color so the color
-    block reads as strictly contained inside the box, with no bleed onto
-    its own border."""
-    _safe_addstr(win, y, x, "┌" + "─" * (width - 2) + "┐")
-    _safe_addstr(win, y + 1, x, "│")
-    _safe_addstr(win, y + 1, x + 1, " " * (width - 2), attr)
-    _safe_addstr(win, y + 1, x + width - 1, "│")
-    _safe_addstr(win, y + 2, x, "└" + "─" * (width - 2) + "┘")
+        text = _wager_text(amount) if amount else ZERO_WAGER
+    _draw_wager_spot(win, box_y, box_x, MAIN_WAGER_BOX_W, curses.color_pair(SPOT_PAIRS["main"]) | (curses.A_DIM if dim else 0))
+    if is_focused:
+        attr = curses.A_REVERSE
+    else:
+        # The amount sits on a chip in the casino color for its size (on the
+        # felt, black and dark colors only read as a chip, not as text).
+        pair = chip_pair(amount)
+        attr = (curses.color_pair(pair) | curses.A_BOLD if pair is not None else 0) | (curses.A_DIM if dim else 0)
+    text = _chip_text(text, MAIN_WAGER_BOX_W)
+    _safe_addstr(win, box_y + 1, _center_x_right_bias(text, MAIN_WAGER_BOX_W, box_x), text, attr)
 
 
 # Each side bet's wager cell is permanently tinted in its own color, the
@@ -782,8 +988,9 @@ def _draw_sidebet_amounts(
             # Greyed out and, per enabled_rows() in _main, simply never
             # reachable by the row scroller (or a mouse click) --
             # unselectable, not just styled.
-            _draw_box(win, box_y, sub_x, SIDEBET_BOX_W, dim=True)
-            _safe_addstr(win, box_y + 1, _center_x_right_bias("Off", SIDEBET_BOX_W - 2, sub_x + 1), "Off", curses.A_DIM)
+            _draw_spot(win, box_y, sub_x, SIDEBET_BOX_W, curses.color_pair(SPOT_PAIRS["off"]) | curses.A_DIM)
+            off = _chip_text("Off", SIDEBET_BOX_W)
+            _safe_addstr(win, box_y + 1, _center_x_right_bias(off, SIDEBET_BOX_W, sub_x), off, curses.A_DIM)
             continue
         if round_ is not None and col < len(round_.spots):
             wager = round_.spots[col].side_bet_wagers.get(key, 0.0)
@@ -800,9 +1007,15 @@ def _draw_sidebet_amounts(
         cell_attr = curses.color_pair(SIDEBET_CELL_PAIR[key])
         if dim:
             cell_attr |= curses.A_DIM
-        _draw_colored_box(win, box_y, sub_x, SIDEBET_BOX_W, cell_attr)
+        # the bet's own color: a light-shade spot, its wager (or name) on a solid chip
+        if dim and key in SPOT_IDLE_PAIRS:
+            spot_attr = curses.color_pair(SPOT_IDLE_PAIRS[key])
+        else:
+            spot_attr = curses.color_pair(SPOT_PAIRS[key]) | (curses.A_DIM if dim else 0)
+        _draw_spot(win, box_y, sub_x, SIDEBET_BOX_W, spot_attr)
         text_attr = (cell_attr | curses.A_REVERSE) if is_focused else cell_attr
-        _safe_addstr(win, box_y + 1, _center_x_right_bias(text, SIDEBET_BOX_W - 2, sub_x + 1), text, text_attr)
+        text = _chip_text(text, SIDEBET_BOX_W)
+        _safe_addstr(win, box_y + 1, _center_x_right_bias(text, SIDEBET_BOX_W, sub_x), text, text_attr)
         rects[(row, col)] = (box_y, sub_x, 3, SIDEBET_BOX_W)
     return rects
 
@@ -1039,18 +1252,18 @@ def _draw_player_spot(
         return
 
     active_index = _active_hand_index(spot, round_)
-    if active_index > 0:
-        chips_text = "   ".join(
-            _emph_compact(hand_value_label(spot.hands[j], resolved=True)) for j in range(active_index)
-        )
-        _safe_addstr(win, chips_y, _center_x(chips_text, col_width, cx), chips_text, curses.A_BOLD)
-
     hand = spot.hands[active_index]
     is_active = active is not None and active[1] is hand
 
     hand_x = cx + max(0, (col_width - _card_block_width(hand)) // 2)
     draw_hand(win, cards_y, hand_x, hand, hide_last=hand.double_hidden)
     _draw_overflow_chips(win, overflow_y, hand_x, CARD_ROW_WIDTH, hand, hide_last=hand.double_hidden)
+
+    if active_index > 0:
+        chips_text = "   ".join(
+            _emph_compact(hand_value_label(spot.hands[j], resolved=True)) for j in range(active_index)
+        )
+        _safe_addstr(win, chips_y, _center_x(chips_text, col_width, cx), chips_text, curses.A_BOLD)
 
     status = hand_status_text(hand, spot, round_)
     if status:
@@ -1128,6 +1341,8 @@ def render(
     input_focus: str = "wager",
     deal_progress: Optional[int] = None,
 ) -> CellRects:
+    global _felt, _bright, _card_back_pair
+    _felt = _bright = None
     stdscr.erase()
     win = stdscr
     betting = round_ is None
@@ -1171,34 +1386,44 @@ def render(
     # RSA), then a divider before the dealer's area ----
     shoe = session.shoe
     y = y_origin
-    title = "Baddie's Casino™ Blackjack"
-    _safe_addstr(win, y, _center_x(title, usable_width, left_margin), title, curses.A_BOLD)
+    for line in ("Baddie's Casino™", "Blackjack"):
+        _safe_addstr(win, y, _center_x(line, usable_width, left_margin), line, curses.A_BOLD)
+        y += 1
+    _draw_gold_divider(win, y, max_x)
     y += 1
 
+    # The blue and red bars run wall to wall inside the rail, like the felt
+    # below them, and their text out to EDGE_PAD columns from the screen's edge.
+    bar_x, bar_w = 1, max(0, max_x - 2)
+    text_left, text_right = EDGE_PAD, max_x - EDGE_PAD
     top_line = rules_summary(session)
-    _draw_filled_banner(win, y, left_margin, usable_width, top_line, curses.color_pair(4) | curses.A_BOLD)
+    _draw_filled_banner(win, y, bar_x, bar_w, top_line, curses.color_pair(4) | curses.A_BOLD)
     cards_dealt_text = f"Cards Left: {shoe.cards_remaining}({shoe.cards_dealt})"
-    _safe_addstr(win, y, left_margin, cards_dealt_text, curses.color_pair(4) | curses.A_BOLD)
-    cell_rects["cards_dealt"] = (y, left_margin, 1, len(cards_dealt_text))
+    _safe_addstr(win, y, text_left, cards_dealt_text, curses.color_pair(4) | curses.A_BOLD)
+    cell_rects["cards_dealt"] = (y, text_left, 1, len(cards_dealt_text))
     if session.has_pending_rule_changes:
         pending_text = "* Rule Changes Pending *"
-        pending_x = left_margin + len(cards_dealt_text) + 2
+        pending_x = text_left + len(cards_dealt_text) + 2
         _safe_addstr(win, y, pending_x, pending_text, curses.color_pair(4) | curses.A_BOLD)
     bankroll_text = f"Bankroll: {money(session.bankroll)}"
-    bankroll_x = max(left_margin, right_edge - len(bankroll_text))
+    bankroll_x = max(text_left, text_right - len(bankroll_text))
     _safe_addstr(win, y, bankroll_x, bankroll_text, curses.color_pair(4) | curses.A_BOLD)
     _safe_addstr(win, y, bankroll_x, "Bankroll:", curses.color_pair(6) | curses.A_BOLD)
     y += 1
 
-    status_line = table_status_summary(session)
-    _draw_filled_banner(win, y, left_margin, usable_width, status_line, curses.color_pair(5) | curses.A_BOLD)
+    # The limits are centered between the count (left) and Net Return
+    # (right): room for the widest either usually gets, whether or not
+    # they're showing, so the wording doesn't change as a round starts.
+    beside = (text_left - bar_x) + max(len("Running: +00   True: +00.0"), len("Net Return: -$000,000.00")) + 2
+    status_line = table_status_summary(session, bar_w - 2 * beside)
+    _draw_filled_banner(win, y, bar_x, bar_w, status_line, curses.color_pair(5) | curses.A_BOLD)
     if session.rules.show_hilo:
         if round_ is not None:
             running_count, true_count = round_.visible_counts(deal_progress)
         else:
             running_count, true_count = shoe.running_count, shoe.true_count
         counts_text = f"Running: {running_count:+d}   True: {true_count:+.1f}"
-        _safe_addstr(win, y, left_margin, counts_text, curses.color_pair(5) | curses.A_BOLD)
+        _safe_addstr(win, y, text_left, counts_text, curses.color_pair(5) | curses.A_BOLD)
     # Net Return: visible for the lifetime of a round (from the moment its
     # wagers are confirmed/dealt through to settlement), directly below
     # Bankroll on the line above -- hidden on the betting screen, same as
@@ -1206,24 +1431,31 @@ def render(
     # there (see _net_return's docstring for what it actually totals).
     if round_ is not None and not animating:
         net_return_text = f"Net Return: {money(_net_return(round_))}"
-        net_return_x = max(left_margin, right_edge - len(net_return_text))
+        net_return_x = max(text_left, text_right - len(net_return_text))
         _safe_addstr(win, y, net_return_x, net_return_text, curses.color_pair(5) | curses.A_BOLD)
         _safe_addstr(win, y, net_return_x, "Net Return:", curses.color_pair(NET_RETURN_LABEL_PAIR) | curses.A_BOLD)
     y += 1
 
+    # ---- The felt: from this row (the top of the dealer's crease) down
+    # through the player spots' overflow row, wall to wall inside the
+    # window border -- everything drawn on it sits on dark green (see
+    # _on_felt), and cards lie on top of it. ----
     dash_row_y = y
-    _safe_addstr(win, y, left_margin, "-" * max(usable_width, 0))
-    y += 1  # divider row -- also doubles as the dealer box's own top border (see below)
+    _felt = (dash_row_y, dash_row_y + FELT_ROWS - 1, 1, max_x - 2)
+    _card_back_pair = CARD_BACK_BLUE_PAIR if session.shoe_number % 2 else CARD_BACK_RED_PAIR
+    for fy in range(_felt[0], _felt[1] + 1):
+        _safe_addstr(win, fy, 1, " " * (max_x - 2), curses.color_pair(FELT_PAIR))
+        # the table's margins, out to the rail either side, in the crease's ▓
+        _safe_addstr(win, fy, 1, TABLE_MARGIN * (left_margin - 1), curses.color_pair(CREASE_EDGE_PAIR))
+        _safe_addstr(win, fy, right_edge, TABLE_MARGIN * (max_x - 1 - right_edge), curses.color_pair(CREASE_EDGE_PAIR))
+    y += 1  # the crease's top border row: the dealer's name, the peek, the dealer's total
 
-    # ---- DEALER: value line, then cards directly beneath with no gap (no
-    # "DEALER" label), then the BUST/BLACKJACK banner on the line after the
-    # card block (see dealer_banner_y) ----
+    # ---- DEALER: a row of grain under the border, then the cards, then the
+    # BUST/BLACKJACK banner on the line after the card block (see
+    # dealer_banner_y) ----
     hide_hole = round_ is not None and not round_.dealer_revealed
     dealer_hand = round_.dealer_hand if round_ else Hand()
     dealer_resolved = round_ is not None and round_.dealer_revealed and round_.phase != Phase.DEALER_TURN
-    if round_ and not animating:
-        value_text = _emph(hand_value_label(dealer_hand, hide_hole=hide_hole, resolved=dealer_resolved))
-        _safe_addstr(win, y, _center_x(value_text, usable_width, left_margin), value_text, curses.A_BOLD)
     y += 1
 
     dealer_cards_base_y = y
@@ -1233,19 +1465,33 @@ def render(
     dealer_banner_y = dealer_cards_base_y + CARD_BLOCK_HEIGHT + DEALER_STACK_DY
     dealer_box_bottom_y = dealer_banner_y + 1
 
-    # ---- Dealer's ♦ box: a rectangle bordering the dashed line above
-    # (dash_row_y -- drawn as part of the header, unchanged) on top, the
-    # divider between spots 0/1 and 0/2 (the same divider_x used for the
-    # player dividers below -- this is exactly the middle column's own
-    # width) on the sides, and a ♦ row of its own on the bottom, sitting
-    # right after the dealer's card block. Drawn *before* the dealer's own
-    # cards just below so a rare oversized hand naturally draws right over
-    # the glyphs instead of being hidden behind them. ----
+    # ---- Dealer's crease: a ▓ border -- along the felt's top row, down the
+    # dividers between spots 0/1 and 0/2 (the same divider_x the player
+    # dividers below use: exactly the middle column's width), and along a
+    # row of its own after the dealer's card block -- round a ░ felt-grain
+    # fill. Drawn *before* the dealer's value and cards, which lie on top of
+    # it (a rare oversized hand simply draws over the border). ----
     box_left, box_right = divider_x[0], divider_x[1]
+    edge_attr = curses.color_pair(CREASE_EDGE_PAIR)
+    grain_attr = curses.color_pair(FELT_GRAIN_PAIR)
+    _safe_addstr(win, dash_row_y, box_left, CREASE_EDGE * (box_right - box_left + 1), edge_attr)
     for dy in range(dash_row_y + 1, dealer_box_bottom_y):
-        _safe_addstr(win, dy, box_left, "♦", curses.color_pair(1))
-        _safe_addstr(win, dy, box_right, "♦", curses.color_pair(1))
-    _safe_addstr(win, dealer_box_bottom_y, box_left, "♦" * (box_right - box_left + 1), curses.color_pair(1))
+        _safe_addstr(win, dy, box_left, CREASE_EDGE, edge_attr)
+        _safe_addstr(win, dy, box_left + 1, CREASE_FILL * max(0, box_right - box_left - 1), grain_attr)
+        _safe_addstr(win, dy, box_right, CREASE_EDGE, edge_attr)
+    _safe_addstr(win, dealer_box_bottom_y, box_left, CREASE_EDGE * (box_right - box_left + 1), edge_attr)
+    # The peek, mid-way along the top border; the dealer's name centered in
+    # the border to its left, their total (once there's a hand) to its right,
+    # each on a clear strip of plain felt.
+    peek_dx, peek = peek_cells(box_right - box_left + 1)
+    peek_x = box_left + peek_dx
+    for i, ch in enumerate(peek):
+        _safe_addstr(win, dash_row_y, peek_x + i, ch, curses.color_pair(PEEK_DARK_PAIR if ch == PEEK_DARK else PEEK_PAIR))
+    name_left, name_w = box_left + 1, peek_x - box_left - 1
+    total_left, total_w = peek_x + len(peek), box_right - (peek_x + len(peek))
+    if session.dealer:
+        strip = f"  {session.dealer}  "[:name_w]
+        _safe_addstr(win, dash_row_y, name_left + max(0, (name_w - len(strip)) // 2), strip, curses.A_BOLD)
 
     # Center on the dealer's actual card count as it grows (not a slot
     # sized for the worst-case 12-card hand), so the row stays centered
@@ -1263,14 +1509,31 @@ def render(
             draw_dealer_cards(win, dealer_cards_base_y, dealer_x, dealer_hand, hide_hole=True, max_cards=dealer_reveal)
         else:
             draw_dealer_cards(win, dealer_cards_base_y, dealer_x, dealer_hand, hide_hole=hide_hole, max_cards=None)
-            # Spans the box's inside, between its ♦ sides -- exactly the
+            # Spans the crease's inside, between its ▓ sides -- exactly the
             # middle spot column, the same width as a player's banner.
             dealer_banner_text, dealer_banner_attr = _dealer_banner(round_)
             if dealer_banner_text:
                 _draw_filled_banner(win, dealer_banner_y, col_x[1], col_width, dealer_banner_text, dealer_banner_attr)
+    if round_ and not animating:
+        value_text = _emph(hand_value_label(dealer_hand, hide_hole=hide_hole, resolved=dealer_resolved))
+        strip = f"  {value_text}  "[:total_w]
+        _safe_addstr(win, dash_row_y, total_left + max(0, (total_w - len(strip)) // 2), strip, curses.A_BOLD)
+
+    # ---- The shoe (right of the crease) and the discard tray (left of it),
+    # level with the dealer's cards. ----
+    shoe_y = dealer_cards_base_y
+    gap = 4  # columns between them and the crease
+    draw_shoe_and_tray(win, session, round_, shoe_y, box_left - gap - (SHOE_W + 2), box_right + gap + 1)
+
+    # ---- The rules, printed on the felt on a gold line between the dealer
+    # and the players. ----
+    rules_y = dealer_box_bottom_y + 1
+    rules_line = f"  {felt_rules(session)}  ".center(max(usable_width, 0), "─")
+    _safe_addstr(win, rules_y, left_margin, rules_line, curses.color_pair(RULES_PAIR) | curses.A_BOLD)
+
     y = dealer_box_bottom_y + 1
 
-    # ---- PLAYER: a buffer row below the dealer box's bottom border, then
+    # ---- PLAYER: the rules row below the dealer box's bottom border, then
     # collapsed chips for any already-completed split hands directly above
     # the cards (no gap) -> cards -> the CURRENT hand's own value (also
     # doubles as the prelim-decision prompt line -- see _draw_player_spot)
@@ -1304,6 +1567,21 @@ def render(
 
     num_hands = session.rules.num_hands
     active = round_.current_player_hand() if round_ else None
+
+    # ---- The spot being played -- the hand whose turn it is, or the one
+    # being asked Insurance?/Even Money?/Surrender?/Double? -- sits on
+    # brighter felt, from its chips row down through its side bets. ----
+    playing = None
+    if round_ is not None and not animating:
+        if round_.phase == Phase.PLAYER_TURN and active is not None:
+            playing = active[0].index
+        elif round_.current_prelim_spot() is not None:
+            playing = round_.current_prelim_spot().index
+    if playing is not None:
+        bx = col_x[SPOT_SCREEN_ORDER[playing]]
+        _bright = (chips_y, _felt[1], bx, bx + col_width - 1)
+        for fy in range(_bright[0], _bright[1] + 1):
+            _safe_addstr(win, fy, bx, " " * col_width, curses.color_pair(FELT_BRIGHT_PAIR))
 
     for i in range(NUM_SPOT_COLUMNS):
         cx = col_x[SPOT_SCREEN_ORDER[i]]
@@ -1364,7 +1642,7 @@ def render(
     # spot instead of just its wager area. ----
     for dx in divider_x:
         for dy in range(settlement_row_y, banner_row2_y + 1):
-            _safe_addstr(win, dy, dx, "♦", curses.color_pair(1))
+            _safe_addstr(win, dy, dx, SPOT_DIVIDER, curses.color_pair(CREASE_EDGE_PAIR))
 
     # ---- Divider separating the table (dealer/player/wagers/side bets)
     # from the CLI section below (hint/message + command input) -- mirrors
@@ -1372,7 +1650,9 @@ def render(
     # stats/payout panel, so the screen reads as three clearly bounded
     # sections stacked top to bottom. ----
     table_divider_y = player_overflow_y + 1
-    _safe_addstr(win, table_divider_y, left_margin, "-" * max(usable_width, 0))
+    _draw_gold_divider(win, table_divider_y, max_x)
+    # Everything below the table runs out to EDGE_PAD columns from the screen's edge.
+    low_x, low_w = EDGE_PAD, max(1, max_x - 2 * EDGE_PAD)
 
     # ---- Hint / message line (shows the active message in place of the
     # contextual hint when there is one) ----
@@ -1398,13 +1678,13 @@ def render(
     elif round_.phase == Phase.SETTLED:
         hint = "[RETURN] Continue"
     if message:
-        _safe_addstr(win, hint_y, left_margin, message, curses.A_BOLD)
+        _safe_addstr(win, hint_y, low_x, message, curses.A_BOLD)
     else:
         # "Dealing..." reads the same bold white as "Dealer is drawing..."
         # (passed in via `message` from _main) -- every other contextual
         # hint stays dim.
         hint_attr = curses.A_BOLD if hint == "Dealing..." else curses.A_DIM
-        _safe_addstr(win, hint_y, left_margin, hint, hint_attr)
+        _safe_addstr(win, hint_y, low_x, hint, hint_attr)
 
     # ---- Command input -- clickable; typing a command requires clicking
     # here first, the same way typing a wager requires clicking that cell
@@ -1412,9 +1692,9 @@ def render(
     input_y = hint_y + 2
     cli_focused = betting and input_focus == "cli"
     if cli_focused:
-        _safe_addstr(win, input_y, left_margin, " " * usable_width, curses.A_REVERSE)
-    _safe_addstr(win, input_y, left_margin, f"> {buffer}", curses.A_REVERSE if cli_focused else 0)
-    cell_rects["cli"] = (input_y, left_margin, 1, max(1, usable_width))
+        _safe_addstr(win, input_y, low_x, " " * low_w, curses.A_REVERSE)
+    _safe_addstr(win, input_y, low_x, f"> {buffer}", curses.A_REVERSE if cli_focused else 0)
+    cell_rects["cli"] = (input_y, low_x, 1, low_w)
 
     # ---- Stats panel: the 3 side-bet payout tables side by side on the
     # left, Session (2x9) and Lifetime (2x6) stats sharing the rest -- the
@@ -1422,11 +1702,9 @@ def render(
     # is only on the full-screen 'stats' command, not here. Every column
     # here follows the same convention: name left-aligned, value
     # right-aligned, so long $ P/L figures never crowd the label. ----
-    divider_y = input_y + 2
-    _safe_addstr(win, divider_y, left_margin, "-" * max(usable_width, 0))
-    stats_y = divider_y + 1
+    stats_y = input_y + 2
 
-    payout_x0 = left_margin
+    payout_x0 = low_x
     payout_region_w = PAYOUT_COL_W * 3 + PAYOUT_GAP * 2
     divider_x = payout_x0 + payout_region_w + 1
     stats_x0 = divider_x + 3
@@ -1451,7 +1729,7 @@ def render(
     # (session's names+values vs. its second names+values, and likewise
     # for lifetime); a wider, double-column gap separates the two tables
     # themselves, beyond their own SESSION/LIFETIME STATS headers.
-    stats_region_w = max(1, usable_width - (stats_x0 - left_margin))
+    stats_region_w = max(1, low_w - (stats_x0 - low_x))
     stats_col_w = max(1, (stats_region_w - 2 * STATS_INNER_GAP - STATS_TABLE_GAP) // 4)
     sess_a_x = stats_x0
     sess_b_x = sess_a_x + stats_col_w + STATS_INNER_GAP
@@ -1475,6 +1753,7 @@ def render(
             line = f"{label[:label_w]:<{label_w}}{'':<{label_value_gap}}{value:>{value_w}}"
             _safe_addstr(win, stats_y + 1 + i, col_x_, line[:row_w])
 
+    _felt = _bright = None  # (nothing drawn after this frame -- overlays, the new-shoe flash -- is on the felt)
     win.refresh()
     return cell_rects
 
@@ -1622,6 +1901,15 @@ def render_gamerules_screen(stdscr, session: GameSession) -> None:
         "RUNNING OUT OF CARDS",
         "  If a shoe ever runs out in the middle of a round, the discards are",
         "  shuffled back in and the round carries on (the count starts over).",
+    ]
+    resting = [n for n in r.recent_dealers if n != session.dealer and n in r.dealers]
+    lines += [
+        "",
+        "DEALERS",
+        f"  Dealing:             {session.dealer or '-'}",
+        f"  Sitting out:         {', '.join(resting) or '-'}",
+        f"  {f'Roster ({len(r.dealers)}):':<21}{', '.join(r.dealers)}",
+        f"  A new dealer every session and every {SHOES_PER_DEALER} shoes; none deals twice in {REST_ROTATIONS + 1} rotations.",
     ]
     _render_overlay_lines(stdscr, "Blackjack -- Game Rules", lines)
 
@@ -1784,18 +2072,29 @@ def render_betspread_screen(stdscr) -> None:
     _render_overlay_lines(stdscr, "Blackjack -- Bet Spread", lines)
 
 
-def _blink_new_shoe(stdscr, session: GameSession, round_: Optional[Round]) -> None:
+def _blink_new_shoe(stdscr, session: GameSession, round_: Optional[Round], new_shoe: bool = True) -> None:
     """Flashes over the CLI input line -- white background, black text --
     so a fresh shoe is unmistakable even if the player's eyes are on
     their cards or wager, not the header's small "Cards Left" cell (easy
-    to miss entirely when focused on play)."""
-    msg = "** NEW SHOE **"
+    to miss entirely when focused on play). A new dealer taking over (see
+    GameSession.rotate_dealer) is flashed the same way -- alternating with
+    NEW SHOE when the two come together."""
+    messages = []
+    if not session.dealer_announced:
+        messages.append("** NEW DEALER **")
+        session.dealer_announced = True
+    if new_shoe:
+        messages.append("** NEW SHOE **")
+    if not messages:
+        return
     attr = curses.color_pair(7) | curses.A_BOLD
-    for i in range(6):
+    flashes = 3 if len(messages) == 1 else 4  # each message twice, when it's both
+    for i in range(2 * flashes):
         cell_rects = render(stdscr, session, round_, "", "")
         if i % 2 == 0:
+            msg = messages[(i // 2) % len(messages)]
             y, x, _h, w = cell_rects.get("cli", (0, 0, 1, 0))
-            width = max(w, len(msg))
+            width = max(w, *(len(m) for m in messages))
             _safe_addstr(stdscr, y, x, " " * width, attr)
             _safe_addstr(stdscr, y, x, msg, attr)
             stdscr.refresh()
@@ -1818,6 +2117,35 @@ BUST_PAIR = 23  # a player bust: white on deep red
 INSURANCE_PAIR = 24  # a settled Insurance side bet, win or lose: black on beige
 NET_RETURN_LABEL_PAIR = 25  # "Net Return:" label on the red bar -- yellow, matching Bankroll's own label treatment
 DEALER_BUST_PAIR = 26  # the dealer's DEALER BUST banner: yellow on bright red
+# The table's felt, and the cards on it.
+FELT_PAIR = 30  # plain felt: the terminal's own text color on dark green
+FELT_GRAIN_PAIR = 31  # the crease's ░ grain: a lighter green on the felt
+CREASE_EDGE_PAIR = 32  # the crease's ▓ border (and the dividers between spots)
+CARD_EDGE_PAIR = 33  # a card's edge: its white, then its dark shadow
+CARD_BLACK_PAIR = 34  # a black card's face: black on white
+CARD_RED_PAIR = 35  # a red card's face: red on white
+CARD_BACK_BLUE_PAIR = 36  # a blue deck's back: white lattice on blue
+CARD_BACK_RED_PAIR = 37  # a red deck's back: white lattice on red
+FELT_TWIN_BASE = 38  # pair N's twin on the felt is FELT_TWIN_BASE + N (for pairs 1-3: red, white, blue text)
+RULES_PAIR = 42  # the rules printed on the felt: gold
+RAIL_PAIR = 43  # the gold rail round the window
+CHIP_PAIRS = {name: 44 + i for i, name in enumerate(("white", "red", "green", "black", "purple", "yellow", "orange"))}
+SHOE_FRAME_PAIR = 51  # the shoe's and the tray's frame and labels
+SHOE_EMPTY_PAIR = 52  # inside an empty shoe/tray: near black
+CUT_CARD_PAIR = 53  # the shoe's yellow cut card
+FELT_BRIGHT_PAIR = 54  # the brighter felt under the spot being played
+BRIGHT_TWIN_BASE = 54  # ... and its twins of pairs 1-3: 55-57
+# Betting spots: light shade in each spot's color (and twins on the brighter felt).
+SPOT_PAIRS = {name: 58 + i for i, name in enumerate(("main", "power_poker", "star21", "dealer_buster", "off"))}
+SPOT_BRIGHT_BASE = 63  # SPOT_PAIRS[name] + 5 is its twin on the brighter felt: 63-67
+SHOE_EDGE_PAIR = 68  # the shoe's and tray's gray frame
+# A spot not in play this round is dimmed -- but the terminal's dim fades
+# Power Poker's magenta into the felt, so its shading gets its own muted
+# shade instead (where the palette has one).
+SPOT_IDLE_PAIRS: Dict[str, int] = {}
+POWER_POKER_IDLE_PAIR = 69
+PEEK_PAIR = 70  # the dealer's peek: mid-dark gray...
+PEEK_DARK_PAIR = 71  # ...darker in the middle
 
 
 def init_colors() -> None:
@@ -1881,7 +2209,9 @@ def init_colors() -> None:
     # side by side. True dark green needs the extended palette; on a basic
     # 8-color terminal there's no darker shade available, so it falls back
     # to plain green (still correct, just less differentiated from Star 21).
-    dark_green = 22 if curses.COLORS >= 256 else curses.COLOR_GREEN
+    # (A shade brighter than the table's own felt, so the banner still reads
+    # as a banner on it.)
+    dark_green = 28 if curses.COLORS >= 256 else curses.COLOR_GREEN
     curses.init_pair(STANDARD_SETTLEMENT_PAIR, curses.COLOR_WHITE, dark_green)
 
     # An immediate player blackjack: dark purple background (distinct from
@@ -1922,6 +2252,77 @@ def init_colors() -> None:
     bright_red = 196 if curses.COLORS >= 256 else curses.COLOR_RED
     bright_yellow = 226 if curses.COLORS >= 256 else curses.COLOR_YELLOW
     curses.init_pair(DEALER_BUST_PAIR, bright_yellow, bright_red)
+
+    # The felt and the cards. True felt green, card white, and deck-back
+    # blue/red need the extended palette; a basic 8-color terminal gets the
+    # nearest of its own.
+    rich = curses.COLORS >= 256
+    felt = 22 if rich else curses.COLOR_GREEN  # #005f00
+    text = -1 if bg == -1 else curses.COLOR_WHITE
+    white = 231 if rich else curses.COLOR_WHITE
+    curses.init_pair(FELT_PAIR, text, felt)
+    curses.init_pair(FELT_GRAIN_PAIR, 28 if rich else curses.COLOR_BLACK, felt)  # #008700
+    curses.init_pair(CREASE_EDGE_PAIR, 28 if rich else curses.COLOR_BLACK, felt)  # #008700 -- ▓ shows it far more than ░ does
+    shade = 236 if rich else curses.COLOR_BLACK  # #303030 -- a card's shadow
+    curses.init_pair(CARD_EDGE_PAIR, white, shade)
+    curses.init_pair(CARD_BLACK_PAIR, 16 if rich else curses.COLOR_BLACK, white)
+    curses.init_pair(CARD_RED_PAIR, 160 if rich else curses.COLOR_RED, white)  # #d70000
+    curses.init_pair(CARD_BACK_BLUE_PAIR, white, 25 if rich else curses.COLOR_BLUE)  # #005faf
+    curses.init_pair(CARD_BACK_RED_PAIR, white, 124 if rich else curses.COLOR_RED)  # #af0000
+    bright_felt = 28 if rich else curses.COLOR_GREEN  # #008700
+    curses.init_pair(FELT_BRIGHT_PAIR, text, bright_felt)
+    FELT_TWINS.clear()
+    BRIGHT_TWINS.clear()
+    FELT_TWINS[0] = FELT_PAIR
+    BRIGHT_TWINS[0] = FELT_BRIGHT_PAIR
+    for pair, fg in ((1, curses.COLOR_RED), (2, curses.COLOR_WHITE), (3, curses.COLOR_BLUE)):
+        curses.init_pair(FELT_TWIN_BASE + pair, fg, felt)
+        FELT_TWINS[pair] = FELT_TWIN_BASE + pair
+        curses.init_pair(BRIGHT_TWIN_BASE + pair, fg, bright_felt)
+        BRIGHT_TWINS[pair] = BRIGHT_TWIN_BASE + pair
+
+    # Pairs past the terminal's limit (64 on a basic 8-color terminal) are
+    # left undefined -- those touches just show in the default colors there.
+    def pair(n: int, fg: int, bg_: int) -> None:
+        if n < curses.COLOR_PAIRS:
+            curses.init_pair(n, fg, bg_)
+
+    spot_colors = {  # light shade of each spot's color
+        "main": 230 if rich else curses.COLOR_YELLOW,  # #ffffd7 beige
+        "power_poker": curses.COLOR_MAGENTA,
+        "star21": curses.COLOR_GREEN,
+        "dealer_buster": 216 if rich else curses.COLOR_YELLOW,  # #ffaf87, the Buster cells' orange
+        "off": 240 if rich else curses.COLOR_WHITE,  # gray
+    }
+    for name, fg in spot_colors.items():
+        pair(SPOT_PAIRS[name], fg, felt)
+        pair(SPOT_PAIRS[name] + 5, fg, bright_felt)
+        BRIGHT_TWINS[SPOT_PAIRS[name]] = SPOT_PAIRS[name] + 5
+    pair(SHOE_EDGE_PAIR, 245 if rich else curses.COLOR_WHITE, felt)  # mid gray
+    pair(PEEK_PAIR, 241 if rich else curses.COLOR_WHITE, felt)  # #626262
+    pair(PEEK_DARK_PAIR, 237 if rich else curses.COLOR_BLACK, felt)  # #3a3a3a
+    SPOT_IDLE_PAIRS.clear()
+    if rich and POWER_POKER_IDLE_PAIR < curses.COLOR_PAIRS:
+        curses.init_pair(POWER_POKER_IDLE_PAIR, 133, felt)  # #af5faf: a shade lighter than in play, not faded out
+        SPOT_IDLE_PAIRS["power_poker"] = POWER_POKER_IDLE_PAIR
+
+    gold = 178 if rich else curses.COLOR_YELLOW  # #d7af00
+    curses.init_pair(RULES_PAIR, gold, felt)
+    curses.init_pair(RAIL_PAIR, gold, bg)
+    chips = {  # chip: (text, chip color)
+        "white": (16, 231), "red": (231, 160), "green": (231, 34), "black": (231, 16),
+        "purple": (231, 91), "yellow": (16, 220), "orange": (16, 208),
+    } if rich else {
+        "white": (curses.COLOR_BLACK, curses.COLOR_WHITE), "red": (curses.COLOR_WHITE, curses.COLOR_RED),
+        "green": (curses.COLOR_BLACK, curses.COLOR_GREEN), "black": (curses.COLOR_WHITE, curses.COLOR_BLACK),
+        "purple": (curses.COLOR_WHITE, curses.COLOR_MAGENTA), "yellow": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
+        "orange": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
+    }
+    for name, (fg, chip) in chips.items():
+        curses.init_pair(CHIP_PAIRS[name], fg, chip)
+    curses.init_pair(SHOE_FRAME_PAIR, 250 if rich else curses.COLOR_WHITE, felt)  # light gray
+    curses.init_pair(SHOE_EMPTY_PAIR, text, 234 if rich else curses.COLOR_BLACK)  # #1c1c1c
+    curses.init_pair(CUT_CARD_PAIR, 220 if rich else curses.COLOR_YELLOW, 220 if rich else curses.COLOR_YELLOW)
 
 
 DEAL_FRAME_MS = 250  # pause between each card of the initial deal animation
@@ -2038,7 +2439,11 @@ def _dispatch_command(raw: str, session: GameSession, round_: Optional[Round], s
         render_stats_screen(stdscr, session, round_)
         return ""
     round_in_progress = round_ is not None and round_.phase != Phase.SETTLED
-    return commands.handle_command(raw, session, round_in_progress, round_open=round_ is not None)
+    shoe_before = session.shoe_number
+    result = commands.handle_command(raw, session, round_in_progress, round_open=round_ is not None)
+    if not session.dealer_announced:  # e.g. 'fire' for the dealer on duty
+        _blink_new_shoe(stdscr, session, round_, new_shoe=session.shoe_number != shoe_before)
+    return result
 
 
 def _hit_test_cell(cell_rects: CellRects, my: int, mx: int) -> Optional[Union[str, Tuple[int, int]]]:
@@ -2249,7 +2654,7 @@ def _main(stdscr, db_path: Optional[Path] = None) -> str:
                     if hit == "cli":
                         commit_bet_cell()
                         input_focus = "cli"
-                    elif hit is not None:
+                    elif isinstance(hit, tuple):  # a betting cell (other named rects, e.g. "cards_dealt", aren't clickable)
                         commit_bet_cell()
                         bet_row, bet_col = hit
                         input_focus = "wager"

@@ -1,7 +1,8 @@
 """The real game, in a pseudo-terminal: deck-size rules and their messages, no hand lock, a genuine mid-hand
 reshuffle on screen, the data written when the game is quit or killed, and the casino floor (python3 -m casino)
 -- its menus by keyboard and mouse, the bank options, and blackjack launched from it -- and both games started
-from another folder through the shell aliases' launchers (bin/casino, bin/blackjack). Needs `pyte`
+from another folder through the shell aliases' launchers (bin/casino, bin/blackjack), the table's look (rail,
+header bars, felt, cards, spots, shoe and tray), and the smallest window it fits in. Needs `pyte`
 (pip install pyte); skipped without it. Takes a few minutes -- it types at human speed so the curses screen
 keeps up."""
 import importlib.util
@@ -19,7 +20,7 @@ if missing:
     print(f"check_ui: SKIPPED ({missing[0]} not available -- pip install pyte)")
     sys.exit(0)
 
-from ui_support import FORCED_LAUNCHER, LEFT, REPO, RIGHT, Game
+from ui_support import FORCED_LAUNCHER, LEFT, REPO, RIGHT, SEEDED_LAUNCHER, Game
 
 fails = []
 
@@ -289,7 +290,7 @@ check(not any(ch in line for line in lines[51:] for ch in "┌┐└┘│"), "t
 notice = inner(lines[58]).strip()
 notice_x = lines[58].index("Intellectual")
 purple = [x for x in range(1, 237) if g.screen.buffer[58][x].bg == "8700af"]
-check(notice.startswith("Intellectual Property of Dylan Behseresht, 2026.") and notice.endswith("expressly prohibited")
+check(notice.startswith("Intellectual Property of Dylan Behseresht, 2026.") and notice.endswith("expressly prohibited.")
       and purple and purple[0] == notice_x - 1 and purple[-1] == notice_x + len(notice),
       "the notice sits on the row above the marquee, on a purple strip the length of its text")
 check(set(inner(lines[59])) <= {" ", "█"} and set(inner(lines[0])) <= {" ", "█"}, "the top and bottom rows hold nothing but the marquee")
@@ -312,7 +313,7 @@ table_pl = c.execute("select sum(total_pl) from hands").fetchone()[0]
 c.close()
 bank = bank_file(home)
 check("Back on the floor from Classic Blackjack." in g.text() and g.alive(), "'exit' in blackjack comes back to the floor")
-check(abs(bank["game_winnings"]["blackjack"] - table_pl) < 1e-6 and f"Balance: ${bank['balance']:,.2f}" in g.text(),
+check(abs(bank["game_winnings"].get("blackjack", 0.0) - table_pl) < 1e-6 and f"Balance: ${bank['balance']:,.2f}" in g.text(),
       f"...where the balance shows what was won or lost at the table ({table_pl:+.2f}), as the bank file has it")
 
 g.send(RIGHT, 0.4)
@@ -423,7 +424,7 @@ ended = c.execute("select count(*) from sessions where ended_at is not null").fe
 c.close()
 check(hands >= 1 and ended == 1, "the session is logged as usual -- and the relative --db path meant the folder it was started in")
 bank = bank_file(home)
-check(abs(bank["game_winnings"]["blackjack"] - table_pl) < 1e-6 and abs(bank["deposited"] - 10_100) < 1e-9,
+check(abs(bank["game_winnings"].get("blackjack", 0.0) - table_pl) < 1e-6 and abs(bank["deposited"] - 10_100) < 1e-9,
       "the bank has the table's results as blackjack's winnings, and 'bank add 100' as a deposit")
 
 g = Game(home, rows=60, cols=238, cmd=[sys.executable, str(REPO / "bin" / "casino")], cwd=here)
@@ -434,6 +435,188 @@ g.send("\r", 3.5)
 check("Bankroll: $" in g.text(), "...where Classic Blackjack starts as usual")
 g.command("quit", 3.0)
 check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "...and 'quit' closes everything")
+
+# =============================================================== H. the table: felt, crease, cards
+FELT, WHITE, BLUE_BACK, RED_BACK = "005f00", "ffffff", "005faf", "af0000"
+sys.path.insert(0, str(REPO))
+from blackjack import ui as bj_ui  # noqa: E402
+from blackjack.dealers import STARTING_DEALERS  # noqa: E402
+
+
+def cells(g):
+    return [(y, x, g.screen.buffer[y][x]) for y in range(g.rows) for x in range(g.cols)]
+
+
+home = tempfile.mkdtemp(prefix="csbj-ui-felt-")
+g = Game(home, rows=60, cols=238, cmd=[sys.executable, str(SEEDED_LAUNCHER)])   # the same hands every run
+g.pump(2.5)
+GOLD = "d7af00"
+check(g.screen.buffer[0][0].data == "╔" and g.screen.buffer[0][0].fg == GOLD and g.screen.buffer[59][1].data == "═",
+      "the window's border is a gold double-line rail")
+blue_y = next(y for y, l in enumerate(g.screen.display) if "6 DECK  •  75%" in l)
+check(all(g.screen.buffer[y][x].bg == color for y, color in ((blue_y, "blue"), (blue_y + 1, "red")) for x in (1, 236)),
+      "the blue and red bars run wall to wall inside the rail, like the felt")
+check("6 DECK  •  75%  •  3:2  •  S17" in g.screen.display[blue_y] and "BJ PAYS" not in g.text(),
+      "the blue bar just tags the payout and soft-17 rules (3:2, S17) -- the felt spells them out")
+lines = g.screen.display
+blue, red = lines[blue_y], lines[blue_y + 1]
+check("3:2  •  S17  •  LATE SURRENDER  •  DAS  •  NO RSA" in blue,
+      "...then surrender, DAS and RSA: every game rule on the blue bar")
+limits = re.search(r"TABLE: Min \$[\d,]+ – Max \$[\d,]+  •  \S.*?(?=\s{3}|$)", red)
+check(limits is not None, f"the red bar: the table's limits, then the side bets' ({limits.group(0) if limits else red.strip()})")
+check(blue[3:14] == "Cards Left:" and blue[234] != " " and blue[235:237] == "  " and red[3:11] == "Running:",
+      "the bars' text runs out to two columns from the rail at either end")
+golds = [y for y in range(g.rows) if g.screen.buffer[y][0].data == "╠"]
+check("Baddie's Casino™" in lines[blue_y - 3] and "Blackjack" in lines[blue_y - 2] and golds[:1] == [blue_y - 1]
+      and lines[blue_y - 1][1:] == "═" * 236 + "╣" and g.screen.buffer[blue_y - 1][100].fg == GOLD,
+      "the title reads Baddie's Casino™ over Blackjack, then a gold double line runs across just above the blue bar")
+below = [lines[y][1:237] for y in range(golds[-1] + 1, g.rows - 1)] if len(golds) == 2 else []
+used = [x for row in below for x, ch in enumerate(row, 1) if ch != " "]
+check(len(golds) == 2 and lines[golds[1]][1:] == "═" * 236 + "╣" and not any(d in row for row in below for d in ("──", "- -", "╌", "┄"))
+      and used and min(used) == 3 and max(used) >= 225,
+      f"a second gold double line closes out the table, and below it the CLI and stats run out to the rail, "
+      f"no dashed line between ({golds}, columns {min(used) if used else None}-{max(used) if used else None})")
+grid = cells(g)
+frames = [c for _, _, c in grid if c.data in "▗▖▝▘" and c.fg == "8a8a8a"]
+check(len(frames) == 8, f"the shoe and the tray sit in thin gray frames ({len(frames)} corners)")
+felt_band = range(blue_y + 2, golds[1]) if len(golds) == 2 else range(0)
+beige = [c for _, _, c in grid if c.data in "░▒" and c.fg == "ffffd7"]
+borders = [(y, x) for y, x, c in grid if y in felt_band and c.data in "╭╮╰╯()"]
+check(len(beige) > 60 and all(c.bg in (FELT, "008700") for c in beige) and not borders,
+      f"the betting spots are shaded patches of felt -- the main wager's beige -- with no borders ({len(beige)} cells, {borders[:3]})")
+zeros = [(y, x) for y, x, c in grid if c.data == "▼"]
+check(len(zeros) == 2 and len({y for y, _ in zeros}) == 1 and g.wager_row() == ("0", "10", "0"),
+      f"a $0 wager shows ▼ in its spot, not 0 ({zeros}, {g.wager_row()})")
+spots = [["".join(g.screen.buffer[y][x].data for x in range(zx - 6, zx + 7)) for y in (zy - 1, zy, zy + 1)] for zy, zx in zeros]
+check(spots and all(top == bottom == "▒" * 13 and mid[0] == mid[-1] == "▒" and mid[1:-1].strip("░") == " ▼ " for top, mid, bottom in spots),
+      f"...in a rectangle: mid shade round the edge, light shade along the middle round the chip {spots[:1]}")
+shoe_y = next(y for y, l in enumerate(g.screen.display) if "SHOE  312 cards · 6.0 decks" in l)
+cut = [x for x in range(238) if g.screen.buffer[shoe_y + 2][x].bg == "ffd700"]
+check("DISCARDS  0 cards · 0.0 decks" in g.screen.display[shoe_y] and len(cut) == 1,
+      "a full shoe beside the dealer, its yellow cut card in place, and an empty discard tray")
+g.send("\r", 4.5)
+grid = cells(g)
+chip_cells = [(y, x) for y, x, c in grid if c.bg == "d70000"]
+chip = "".join(g.screen.buffer[y][x].data for y, x in chip_cells)
+y0, x0 = chip_cells[0] if chip_cells else (0, 0)
+around = (g.screen.buffer[y0][x0 - 1], g.screen.buffer[y0][x0 + len(chip)])
+check(chip == " 10 " and all(c.data == "░" and c.fg == "ffffd7" for c in around),
+      f"the $10 wager sits on a red chip, the spot's shading right up around it: '{chip}'")
+felt_rows = [y for y in range(g.rows) if g.screen.buffer[y][1].bg == FELT]
+check(len(felt_rows) >= 25 and felt_rows == list(range(felt_rows[0], felt_rows[-1] + 1)),
+      f"the table sits on dark-green felt, wall to wall: {len(felt_rows)} rows from {felt_rows[:1]}")
+off_margin = [(y, x) for y in felt_rows for x in [*range(1, 6), *range(232, 237)]
+              if (g.screen.buffer[y][x].data, g.screen.buffer[y][x].fg) != ("▓", "008700")]
+check(not off_margin and not any(g.screen.buffer[y][x].data == "▓" for y in felt_rows for x in (6, 231)),
+      f"the table's margins, out to the rail either side, are the crease's ▓ {off_margin[:3]}")
+top = felt_rows[0]
+sides = [x for x in range(6, 232) if g.screen.buffer[top + 1][x].data == "▓"]
+box_left, box_right = (sides[0], sides[-1]) if sides else (0, 0)
+peek_dx, peek = bj_ui.peek_cells(box_right - box_left + 1)
+px = box_left + peek_dx
+drawn = [(g.screen.buffer[top][x].data, g.screen.buffer[top][x].fg) for x in range(px, px + len(peek))]
+check("".join(ch for ch, _ in drawn) == peek and set(drawn) == {("▒", "626262"), ("▓", "3a3a3a")}
+      and px - box_left == box_right + 1 - (px + len(peek)) and len(peek) == (5 if (box_right - box_left + 1) % 2 else 6),
+      f"the dealer's peek sits dead center on the crease's top border: {peek} in gray, darker in the middle")
+
+
+def beside_peek(side):
+    """The text on the crease's top border left or right of the peek, and how far off center it is."""
+    lo, hi = (box_left + 1, px) if side == "left" else (px + len(peek), box_right)
+    seg = g.screen.display[top][lo:hi]
+    text = seg.strip("▓")
+    lead, trail = len(seg) - len(seg.lstrip("▓")), len(seg) - len(seg.rstrip("▓"))
+    return text.strip(), abs(lead - trail)
+
+
+name, off = beside_peek("left")
+check(name in STARTING_DEALERS and off <= 1, f"the dealer's name, centered on the border left of the peek: '{name}' ({off} off center)")
+total, off = beside_peek("right")
+check(re.fullmatch(r"\*\*\* .+ \*\*\*", total) is not None and off <= 1 and "***" not in "".join(lines[top + 1:top + 3]),
+      f"...and the dealer's total right of it, no longer inside the crease: '{total}' ({off} off center)")
+holes = [(y, x) for y in felt_rows for x in range(1, 237)
+         if g.screen.buffer[y][x].bg == "default" and g.screen.buffer[y][x].data != " "]
+check(not holes, f"nothing on the felt punches a hole in it (text keeps the felt behind it): {holes[:3]}")
+crease = [c for _, _, c in grid if c.data == "▓"]
+grain = [c for _, _, c in grid if c.data == "░" and c.fg == "008700"]
+check(len(crease) > 60 and len(grain) > 300 and all(c.bg == FELT for c in crease + grain),
+      "the dealer's crease: a ▓ border round a ░ grain, on the felt")
+faces = [c for _, _, c in grid if c.bg == WHITE and c.data in "♠♣♥♦"]
+check(faces and {c.fg for c in faces} <= {"000000", "d70000"},
+      "cards have white faces, their suits in black or red")
+SHADE = "303030"
+rims = [c for _, _, c in grid if c.data in "▗▄▖▐▌▝▀▘" and c.fg == WHITE and c.bg == SHADE]
+check(len(rims) > 30 and sum(c.data in "▗▖▝▘" for c in rims) >= 8,
+      f"...squared off half a cell in, their dark shadow right up against the white ({len(rims)} edge cells)")
+face_cells = {(y, x) for y, x, c in grid if c.bg == WHITE and c.fg in ("000000", "d70000")}
+on_card = (WHITE, SHADE, BLUE_BACK, RED_BACK)
+bare = [(y, x) for y, x in face_cells for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1))
+        if g.screen.buffer[ny][nx].bg not in on_card]
+check(face_cells and not bare, f"...so no white ever meets the felt: the shadow runs all round, and between fanned cards {bare[:3]}")
+check(golds[1:] == [felt_rows[-1] + 1], f"the felt runs right down to the gold line under the side bets ({golds}, {felt_rows[-1]})")
+backs = {c.bg for _, _, c in grid if c.data == "╳"}
+check(backs == {BLUE_BACK}, f"the dealer's hole card shows this shoe's back: a blue lattice ({backs})")
+rules_y, rules_x = next((y, l.index("BLACKJACK PAYS")) for y, l in enumerate(g.screen.display) if "BLACKJACK PAYS" in l)
+check("BLACKJACK PAYS 3 TO 2  ·  DEALER STANDS ON SOFT 17  ·  INSURANCE PAYS 2 TO 1" in g.screen.display[rules_y]
+      and g.screen.buffer[rules_y][rules_x].fg == GOLD and g.screen.display[rules_y].count("─") > 100,
+      "the rules are printed on the felt in gold, on a gold line between the dealer and the players")
+bright = sum(1 for _, _, c in grid if c.bg == "008700")
+check(bright > 500, f"the spot being played sits on brighter felt ({bright} cells)")
+g.to_idle()
+tray = re.search(r"DISCARDS  (\d+) cards", g.text())
+check(tray and int(tray.group(1)) > 0, f"once the round's cleared away, its cards are in the discard tray ({tray.group(1) if tray else None})")
+g.command("powerpoker on", 0.6)
+g.command("bj65", 0.6)
+g.command("h17", 0.6)
+g.command("newshoe", 0.6)
+g.send("\r", 3.0)
+g.send("\r", 4.5)
+grid = cells(g)
+poker = {c.fg for _, _, c in grid if c.data == "░" and c.fg in ("magenta", "af5faf")}
+idle = sum(1 for _, _, c in grid if c.data == "░" and c.fg == "af5faf")
+check(poker == {"magenta", "af5faf"} and idle > 40,
+      f"Power Poker's spot shows magenta in play, and a muted magenta where the spot's sitting out -- not dimmed into the felt ({poker}, {idle})")
+shoe_y, shoe_x = next((y, l.index("SHOE  ")) for y, l in enumerate(g.screen.display) if "SHOE  " in l)
+stack = {g.screen.buffer[shoe_y + 2][x].bg for x in range(shoe_x, shoe_x + 30) if g.screen.buffer[shoe_y + 2][x].data == "│"}
+check(stack == {RED_BACK}, f"the next shoe's deck has red backs -- its cards in the shoe show red ({stack})")
+check(g.line_with("BLACKJACK PAYS 6 TO 5  ·  DEALER HITS ON SOFT 17  ·  INSURANCE PAYS 2 TO 1") is not None
+      and g.line_with("6:5  •  H17") is not None,
+      "a 6:5, hit-soft-17 shoe says so on the felt, and tags it 6:5, H17 in the blue bar")
+g.to_idle()
+cards_left = next((y, l.index("Cards Left:")) for y, l in enumerate(g.screen.display) if "Cards Left:" in l)
+click(g, cards_left[0], cards_left[1] + 3)
+click(g, top, box_left + 3)
+check(g.alive() and b"Traceback" not in g.raw and "[RETURN] to Deal" in g.text(),
+      "a click on the Cards Left count, or the felt, is just ignored (the count used to close the game)")
+before = beside_peek("left")[0]
+mark = len(g.raw)
+g.command("newsession", 0.6)
+g.send("\r", 3.5)
+flashed, after = g.raw[mark:], beside_peek("left")[0]
+check(after in STARTING_DEALERS and after != before and b"** NEW DEALER **" in flashed and b"SHOE **" in flashed,
+      f"a new session brings a new dealer ({before} -> {after}), the CLI flashing NEW DEALER and NEW SHOE in turn")
+mark = len(g.raw)
+g.command(f"fire {after}", 3.0)
+flashed, now = g.raw[mark:], beside_peek("left")[0]
+check(now in STARTING_DEALERS and now not in (before, after) and f"Fired {after}. {now} takes over the table." in g.text()
+      and b"** NEW DEALER **" in flashed and b"SHOE **" not in flashed,
+      f"firing the dealer on duty brings the next one in, flashing NEW DEALER alone ({after} -> {now})")
+g.kill()
+
+# =============================================================== I. the smallest window the table fits in
+W, H = bj_ui.MIN_COLS, bj_ui.MIN_LINES
+g = Game(tempfile.mkdtemp(prefix="csbj-ui-min-"), rows=H, cols=W)
+g.pump(2.5)
+lines = g.screen.display
+check(lines[0] == "╔" + "═" * (W - 2) + "╗" and lines[-1] == "╚" + "═" * (W - 2) + "╝"
+      and "Bankroll:" in lines[4] and "Any 19" in lines[-2],
+      f"at the smallest size it asks for ({W}x{H}) the table fills the window exactly, the rail untouched all round")
+g.kill()
+g = Game(tempfile.mkdtemp(prefix="csbj-ui-min-"), rows=H - 1, cols=W)
+g.pump(2.5)
+check(f"at least {W}x{H}) terminal -- currently {W}x{H - 1}" in g.text() and "Bankroll:" not in g.text(),
+      "...and a row short of it, it says so instead of drawing the table")
+g.kill()
 
 print()
 print("check_ui: FAILED" if fails else "check_ui: ALL UI CHECKS PASSED", *fails, sep="\n  - " if fails else "")

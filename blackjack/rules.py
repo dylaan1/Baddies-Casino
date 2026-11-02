@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Dict
+from typing import Dict, List
 
+from .dealers import REST_ROTATIONS, STARTING_DEALERS, clean_roster
 from .sidebets import default_payouts
 
 # "deckpen rand" re-rolls Rules.penetration to somewhere in this range every
@@ -94,6 +95,12 @@ class Rules:
     # commands._sidebet_payout_command for the command itself.
     payouts: Dict[str, Dict[str, float]] = field(default_factory=default_payouts)
 
+    # The dealers the table rotates through ('hire' / 'fire' -- see
+    # blackjack/dealers.py), and the last few who dealt, oldest first: saved
+    # with the rules so the rotation picks up where the last session left off.
+    dealers: List[str] = field(default_factory=lambda: list(STARTING_DEALERS))
+    recent_dealers: List[str] = field(default_factory=list)
+
     @property
     def surrender_late(self) -> bool:
         return self.surrender == "late"
@@ -134,6 +141,9 @@ class Rules:
                         except (TypeError, ValueError):
                             pass
         rules.payouts = merged
+        rules.dealers = clean_roster(data.get("dealers"))
+        recent = data.get("recent_dealers")
+        rules.recent_dealers = [n for n in recent if isinstance(n, str)][-REST_ROTATIONS:] if isinstance(recent, list) else []
         return rules
 
     def blackjack_payout_label(self) -> str:

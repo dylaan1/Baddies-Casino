@@ -149,9 +149,58 @@ realistic table.
 - **Full-screen curses UI** that launches maximized and dynamically
   re-centers the whole table (cards, wagers, results, stats) around whatever
   terminal size it gets.
+- **A felt table inside a gold rail**: the window's border is a gold
+  double-line rail, and the whole playing area — from the dealer's crease
+  down through the betting spots — sits on dark-green felt, wall to wall,
+  with every value, prompt, and spot on top of it. The table's margins, out
+  to the rail on either side, are filled with the crease's `▓`. The spot being played
+  (the hand whose turn it is, or the one being asked Insurance? / Even
+  Money? / Surrender? / Double?) sits on brighter felt.
+- **The header**: "Baddie's Casino™" over "Blackjack", then a gold
+  double-line divider across the screen, then two bars running wall to wall
+  inside the rail, their text out near it. The blue bar is every game rule
+  — decks, penetration, **3:2** or **6:5**, **S17** or **H17**, surrender
+  (late / early / none), DAS, RSA — with the cards left at the left and your
+  bankroll at the right; the red bar is the table's limits — **TABLE: Min
+  $25 – Max $5,000 • All Side Bets are Min $5 – Max $100** (bet by bet when
+  the side bets' limits differ, shortened to "$5–$100" if that's too long
+  for the window) — with the running/true count at the left and the round's
+  Net Return at the right.
+- **The rules printed on the felt**, in gold on a gold line between the
+  dealer and the players, as the shoe in play deals them: **BLACKJACK PAYS 3
+  TO 2** (or **6 TO 5**) · **DEALER STANDS** (or **HITS**) **ON SOFT 17** ·
+  **INSURANCE PAYS 2 TO 1**. A change to either rule shows once it takes
+  effect, with the next shoe.
+- **Cards that look like cards**: solid white, with the rank and suit in
+  black or red, their edges squared off half a cell in, with a dark shadow
+  right up against them all round — where cards fan out over each other (or
+  the dealer's up-card lies over the hole card), the top card's shadow on
+  the one beneath divides them. Face-down cards (the dealer's hole card, a
+  face-down double or split-ace card) show a white-edged lattice back, and
+  like a casino, the table alternates decks shoe by shoe: blue backs on the
+  first shoe, red on the next, and so on.
+- **The shoe and the discard tray**, either side of the dealer's crease as
+  you'd see them across a casino table: the shoe on the right, its stack of
+  cards (in this shoe's back color) emptying as it's dealt, with the yellow
+  **cut card** in the stack coming up toward the front — when it reaches the
+  front, the shoe is done; the tray on the left, filling as each round's
+  cards are cleared away. Each sits in a thin gray frame and shows its count
+  in cards and decks, so between them they're a penetration gauge to
+  practice your true count against.
+- **Betting spots and chips**: each spot is a patch of shaded felt with no
+  border. The main wager's is a beige rectangle — mid shade `▒` round its
+  edge, light shade `░` along the middle where the chip sits — and each side
+  bet's a rounded patch of `░` in its own color. A main wager of $0 shows a
+  `▼` where its chip would be. A main wager sits on a chip in casino colors for its size — white
+  under $5, red $5, green $25, black $100, purple $500, yellow $1,000,
+  orange $5,000 — and a side bet's amount on a solid pill in its spot's
+  color, both readable on the shading around them. A spot that's sitting
+  out the round is dimmed; Power Poker's goes a muted magenta instead,
+  since dimming fades it into the felt.
 - **Three always-visible spots** — Hand #1 sits center, Hand #2 fills to the
-  left, Hand #3 fills to the right — separated by a decorative `♦` divider,
-  evenly spaced with any leftover width left unused on the far right.
+  left, Hand #3 fills to the right — separated by `▓` dividers matching the
+  dealer's crease, evenly spaced with any leftover width left unused on the
+  far right.
 - **Real-table dealing order**: cards are dealt, and prompts/actions are
   taken, rightmost active spot first working left (mirroring how a live
   dealer works around a table), not left-to-right. The initial deal animates
@@ -161,19 +210,24 @@ realistic table.
   card's back peeking out just below and to the right of it — instead of
   sitting side by side. Once revealed (or during the dealer's own turn), it
   switches to the same fanned row every other hand uses.
-- **Dealer's box**: a `♦`-bordered rectangle frames the dealer's hand —
-  top border is the dashed line under the red status bar, sides run down
-  the same dividers that separate the three spot columns, bottom border is
-  its own `♦` row sitting just past the dealer's banner line. Inside it,
-  top to bottom: the dealer's hand value, the cards, then (one line clear
-  of the revealed cards) a full-width **DEALER BLACKJACK** (white on
-  maroon) or **DEALER BUST** (yellow on bright red) banner when either
-  happens. On the rare
-  hand big enough to spill past it, the cards simply draw over the border
-  glyphs rather than getting clipped or hidden. Each player column's own
-  `♦` divider, by contrast, only starts at the settlement-banner row right
-  above the wager box — it no longer runs up alongside the cards, so it
-  reads as bordering just the wager area, not the whole spot.
+- **Dealer's crease**: a `▓`-bordered panel of `░` felt grain frames the
+  dealer's hand — its top border is the felt's first row, just under the red
+  status bar; its sides run down the same dividers that separate the three
+  spot columns; its bottom border is its own row just past the dealer's
+  banner line. Dead center on the top border sits the **dealer's peek**: five
+  gray `▒` cells (six on an even-width border), the middle one or two a
+  darker `▓`, like the peek window on a real table. Left of the peek, the
+  **dealer's name**; right of it, once there's a hand, the **dealer's
+  total** — each centered in its half of the border, on a clear strip of
+  plain felt. Inside the crease, top to bottom: a row of grain, the cards
+  lying on the felt, then (one line clear of the revealed cards) a full-width
+  **DEALER BLACKJACK** (white on maroon) or **DEALER BUST** (yellow on
+  bright red) banner when either happens. On the rare hand big enough to
+  spill past it, the cards simply draw over the border rather than getting
+  clipped or hidden. Each player column's own `▓` divider, by contrast, only
+  starts at the settlement-banner row right above the wager box — it
+  doesn't run up alongside the cards, so it reads as bordering just the
+  wager area, not the whole spot.
 - **Player column order, top to bottom**: any already-completed split
   hands' collapsed values, directly above the cards (no gap) — cards —
   the current hand's value (doubling as the Early Surrender?/Insurance?/
@@ -186,10 +240,10 @@ realistic table.
   once (see **Multi-hand play & splits** below), each hand's own value
   sits directly below its own cards, the same relative spot every other
   hand's value occupies — never collapsed above.
-- **Two dashed dividers close out the table**, splitting the screen into
-  three clear sections stacked top to bottom: the table itself (dealer,
-  spots, wagers, side bets), then the command-line section (the
-  hint/message line and the input line), then the stats/payout panel.
+- **A gold double-line divider closes out the table**, just under the side
+  bets: below it, the command-line section (the hint/message line and the
+  input line) and then the stats/payout panel run the full width of the
+  window, out near the rail — only the table keeps its margins.
 
 **Configurable table rules** (all changeable live via commands, no restart
 required)
@@ -212,14 +266,15 @@ required)
   still tracked internally either way, just visible or not)
 
 Deck count, penetration, blackjack payout, and dealer soft-17 behavior —
-the four settings on the blue rules-summary line — only ever take effect
-at the *next* shuffle, so you never play through one shoe under two
+the first four settings on the blue rules-summary line — only ever take
+effect at the *next* shuffle, so you never play through one shoe under two
 different rulesets. Change one mid-shoe and a "\* Rule Changes Pending \*"
 flag lights up next to the card count until the next reshuffle (`newshoe`,
 or the automatic one when the shoe runs low) actually applies it; until
-then, the blue and red summary lines keep showing what's really in effect,
-not what's queued up. Every other rule (DAS, RSA, surrender, table limits,
-double options, side bets) applies immediately.
+then, the blue line and the rules on the felt keep showing what's really in
+effect, not what's queued up. Every other rule (surrender, DAS, RSA — the
+rest of the blue line — table limits, double options, side bets) applies
+immediately.
 - Max hands from splitting non-ace pairs (1–8; 2 on a single-deck shoe)
 - Table min/max wagers
 - Optional face-down double-down card (revealed only at the dealer's
@@ -542,6 +597,25 @@ adds a sound beyond the ordinary card-deal ones.
   disappears once you press RETURN to move past a settled round, and
   reappears the moment your next round's wagers are dealt.
 
+**Dealers**
+
+- A dealer runs the table, named on the crease's top border left of the
+  peek. A new one takes over at the start of every session and after every
+  six shoes within one, picked at random from the roster — never one who
+  dealt either of the last two shifts, so no one deals twice in any three
+  rotations in a row (that holds across sessions too). The CLI flashes
+  **NEW DEALER** the way it flashes **NEW SHOE**, alternating the two when
+  both happen at once; a session's first dealer is simply there when it
+  opens.
+- The roster starts with ten: Aster, Barret, Dong, Kayla, Matt, Oswego,
+  Raysha, Steve, Thi, and Xiang. `hire NAME` adds a dealer (up to 12
+  characters; typed all in lower case, it's capitalized), `fire NAME` lets
+  one go — at least three stay, the minimum the rotation needs. Firing the
+  dealer on duty brings the next one in at once (between rounds only).
+  `dealers` lists the roster, who's dealing, and who's sitting out; the
+  `gamerules` screen shows the same. The roster and the last two dealers are
+  saved with your table rules.
+
 **Shoe/session management**
 
 - `newshoe` and `newsession` (each with a RETURN confirmation) reshuffle
@@ -633,7 +707,7 @@ key shows the next one.
 - The standard library `sqlite3` module (ships with Python) for the history
   database
 - A terminal that supports full-screen/maximize (the game sends a maximize
-  escape sequence on launch) and is at least **193x49** — it will refuse to
+  escape sequence on launch) and is at least **187x50** — it will refuse to
   draw the table and show a "too small" message below that size
 
 No third-party packages are required to run the game itself.
@@ -772,6 +846,14 @@ a whole number is shown as the fraction it equals: `buster 3 1.5` reads
 | `newshoe` | Reshuffle a fresh shoe (RETURN confirms) |
 | `newsession` | Start a new session on a new shoe (session panel starts over, bankroll untouched; RETURN confirms) |
 
+**Dealers**
+
+| Command | Effect |
+|---|---|
+| `dealers` | List the roster: who's dealing, who's sitting out |
+| `hire NAME` | Add a dealer to the rotation |
+| `fire NAME` | Let a dealer go (at least 3 stay; the dealer on duty can only go between rounds) |
+
 **Data & backups** (see **Data storage** below)
 
 | Command | Effect |
@@ -836,6 +918,7 @@ table, so there's no separate command to look them up.
 | `cards.py` | `Card`, `Shoe` (shuffling, drawing, Hi-Lo running/true count) |
 | `hand.py` | `Hand` — cards, totals (soft/hard), blackjack/bust/split/double state |
 | `dealer.py` | Dealer drawing logic (S17/H17) |
+| `dealers.py` | The dealer roster and rotation: the starting ten, who deals next, `hire`/`fire` name rules |
 | `sidebets.py` | Power Poker / Star 21 (standard + double-deck) / Dealer Buster evaluators and their deck-count gating |
 | `rules.py` | `Rules`/`SideBetRules` — every configurable table rule, with JSON (de)serialization |
 | `stats.py` | `Stats` — the lifetime/session numbers the panels show (a read-only snapshot of what the database says) |
@@ -869,11 +952,12 @@ CSBJ_FULL=1 python3 -m unittest discover -s tests   # also the mutation check an
 | `check_history_reshuffle.py` | How the log records a round that ran the shoe dry (start shoe, the `reshuffled_mid_round` flag, the exact cards of both shoes), and upgrades of older database versions |
 | `check_stats_and_import.py` | Every lifetime and session figure comes from the database; the one-time import of an older game's stats (including negative figures); `newsession`, `bank reset`, and `--db` |
 | `check_launchers.py` | The shell aliases: the launchers from another folder (a same-named module there isn't picked up instead), and the installer (added once, updated in place, backed up, written through a symlink, the rest of the file untouched, the aliases working in zsh) |
+| `check_table.py` | The table's look apart from the screen: the rules on the felt follow the rules in play (a change waits for the next shoe), the red bar's limits (as one range, bet by bet, shortened when tight), chip colors by wager, the shoe/tray gauge (the cut card coming up toward the front), the shoe count the card backs alternate on, the dealer rotation (every session and six shoes, none twice in three, carried across sessions), `hire`/`fire`, and the peek's size |
 | `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, blackjack's bank commands and results landing in the right column, the floor's layout, menus (Bank flowing into Data), focus, clicks, and bank options, the marquee (a light every third outer cell at every window size, alternating with no seam, moving clockwise), the line chart, and blackjack's records read back exactly and read-only |
 | `check_data_safety.py` | `export`, `backup`, `restore` (and rejecting bad backups), crash recovery, corrupt or newer files, atomic saves, and playing on with no database |
 | `check_locked_db.py` | Another program holding the database: nothing is dropped or mis-attributed, and it all lands, in order, once the lock lifts |
 | `check_audit.py` | Thousands of random rounds with the log attached, checked against ground truth: bankroll conservation, the casino bank getting exactly the table's P/L, the exact cards dealt, every stat against an independent implementation, the running counts |
-| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, the casino floor by keyboard and mouse (its colors and margins, the marquee lit and chasing clockwise, blackjack launched from it, the bank options, both Data windows), and both games started from another folder through the aliases' launchers. Needs `pip install pyte`; skipped without it |
+| `check_ui.py` | The real screen in a pseudo-terminal: the table's gold rail and dividers, the header bars, felt and its `▓` margins, crease, the dealer's peek, name and total, rules line, the main wager's rectangle and `▼`, the NEW DEALER flash, shaded betting spots and chips, shoe and tray, the brighter felt under the spot being played, and cards (white faces squared off half a cell in, the shadow round them and between fanned cards, the back alternating blue/red by shoe), the idle Power Poker spot's muted magenta, the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, the casino floor by keyboard and mouse (its colors and margins, the marquee lit and chasing clockwise, blackjack launched from it, the bank options, both Data windows), both games started from another folder through the aliases' launchers, and the smallest window the table fits in (the size it asks for, exactly). Needs `pip install pyte`; skipped without it |
 | `tools/mutation_check.py` | Injects known bugs and confirms the checks above fail for each — a check that can't fail proves nothing |
 | `tools/consumption.py`, `tools/montecarlo.py`, `tools/adversary.py` | The measurements behind the minimum-cards floors: cards used per round, crash / failsafe rates per configuration over millions of rounds, and a search over every legal line of play (run them directly; `--help`-style usage is in each file's docstring) |
 

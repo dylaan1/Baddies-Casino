@@ -2,4 +2,4 @@
 counting, side bets, and configurable casino rules.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.1.1"
