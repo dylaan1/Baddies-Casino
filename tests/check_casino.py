@@ -205,8 +205,8 @@ check(v.cursor == 0 and v.top == 0 and v.more_below, "Home goes back to the top"
 
 check(floor_m.GAMES[0].name == "Classic Blackjack" and floor_m.GAMES[0].bank_key == "blackjack", "the Games menu lists Classic Blackjack")
 check([m.title for m in floor_m.Floor().menus] == ["GAMES", "BANK", "DATA"]
-      and [i.label for i in floor_m.DATA_ITEMS] == ["Historical Session Data", "P/L Charts"],
-      "three menus: GAMES, BANK, and DATA with Historical Session Data and P/L Charts")
+      and [i.label for i in floor_m.DATA_ITEMS] == ["Historical Session Data", "P/L Charts", "P/L by Dealer"],
+      "three menus: GAMES, BANK, and DATA with Historical Session Data, P/L Charts, and P/L by Dealer")
 inch = floor_m.COLUMNS_PER_INCH
 games = [floor_m.Game(f"Game {i}", f"g{i}", lambda: None) for i in range(40)]
 S.reset_data()
@@ -251,9 +251,11 @@ check(f.focus == 2 and f.menus[2].cursor == 0, "Down on Transactions carries on 
 f.key(curses.KEY_DOWN)
 check(f.focus == 2 and f.menus[2].current.action == "data:charts" and f.key(10) == "data:charts", "...down to P/L Charts, which Enter picks")
 f.key(curses.KEY_DOWN)
-check(f.focus == 2 and f.menus[2].cursor == 1, "Down on DATA's last option stays there")
-f.key(curses.KEY_UP)
-f.key(curses.KEY_UP)
+check(f.focus == 2 and f.menus[2].current.action == "data:dealers" and f.key(10) == "data:dealers", "...then P/L by Dealer")
+f.key(curses.KEY_DOWN)
+check(f.focus == 2 and f.menus[2].cursor == 2, "Down on DATA's last option stays there")
+for _ in range(3):
+    f.key(curses.KEY_UP)
 check(f.focus == 1 and f.menus[1].current.label == "Transactions", "Up on DATA's first option goes back into BANK, at Transactions")
 f.key(curses.KEY_DOWN)
 f.key(curses.KEY_LEFT)
@@ -411,6 +413,55 @@ check(data_views.session_header().split()[0] == "Started" and data_views.session
       f"{len(recs)} sessions" in data_views.session_totals(recs), "the session table's rows and totals")
 detail = dict(data_views.session_detail(first))
 check(detail["Total P/L"] == bjrecords.signed(first.total_pl) and detail["Doubles"] == details["Doubles"], "a session's detail view: the common figures, then blackjack's")
+
+# who dealt: the session detail's "Dealt by", and P/L by Dealer
+dealt = {sid: [n for (n,) in hist.conn.execute("select dealer_name from hands where session_id = ? group by dealer_name order by min(hand_id)", (sid,))]
+         for sid in rows}
+check(all(len(names) == 1 for names in dealt.values()) and dealt[recs[0].number] != dealt[recs[-1].number]
+      and all(dict(r.details)["Dealt by"] == dealt[r.number][0] for r in recs) and recs[0].details[0][0] == "Dealt by",
+      f"each session's detail opens with who dealt it -- a new dealer for the new session ({dealt})")
+table = bjrecords.dealers()
+by_name = {d.name: d for d in table.dealers}
+ok = True
+for r in recs:
+    d = by_name[dealt[r.number][0]]
+    sess = rows[r.number]
+    ok = ok and (d.sessions, d.rounds, d.hands, d.won, d.lost, d.pushed) == (
+        1, sess["rounds_played"], sess["hands_played"], sess["hands_won"], sess["hands_lost"], sess["hands_pushed"]
+    ) and abs(d.wagered - sess["main_wagered"]) < 1e-6 and abs(d.main_pl - sess["main_pl"]) < 1e-6 and abs(d.side_pl - sess["sidebet_pl"]) < 1e-6
+check(ok and len(table.dealers) == 2 and table.unrecorded_hands == 0,
+      "P/L by Dealer: each dealer's rounds, hands, W-L-P, wagers, and P/L -- here, exactly their session's")
+check([d.total_pl for d in table.dealers] == sorted((d.total_pl for d in table.dealers), reverse=True)
+      and abs(sum(d.total_pl for d in table.dealers) - total) < 1e-6, "...best total P/L first, adding up to every hand's")
+dealing = s.dealer
+commands = importlib.import_module("blackjack.commands")
+commands.handle_command(f"fire {dealing}", s)
+play(s, 4, seed=33)
+names = [n for (n,) in hist.conn.execute("select dealer_name from hands where session_id = ? group by dealer_name order by min(hand_id)", (open_session,))]
+newest = bjrecords.sessions()[0]
+check(names == [dealing, s.dealer] and dict(newest.details)["Dealt by"] == f"{dealing}, {s.dealer}",
+      f"a dealer let go mid-session: both are listed, in the order they dealt ({dict(newest.details)['Dealt by']})")
+many = ["Aster", "Barret", "Dong", "Kayla", "Matt", "Oswego", "Raysha", "Steve"]
+hist.conn.executemany("update hands set dealer_name = ? where hand_id = ?",
+                      [(name, hand_id) for name, (hand_id,) in zip(many, hist.conn.execute(
+                          "select min(hand_id) from hands where session_id = ? group by round_id order by 1", (open_session,)))])
+hist.conn.commit()
+wrapped = [(label, value) for label, value in bjrecords.sessions()[0].details if label in ("Dealt by", "")][:3]
+check(len(wrapped) >= 2 and wrapped[0][0] == "Dealt by" and wrapped[1][0] == "" and all(len(v) <= bjrecords.DEALT_BY_WIDTH for _, v in wrapped)
+      and ", ".join(v for _, v in wrapped if v).startswith("Aster, Barret, Dong"),
+      f"...and a long list wraps onto more lines under the label: {wrapped}")
+hist.conn.execute("update hands set dealer_name = null where session_id = ?", (first.number,))
+hist.conn.commit()
+table = bjrecords.dealers()
+old_hands, old_pl = hist.conn.execute("select sum(outcome <> 'abandoned'), sum(total_pl) from hands where session_id = ?", (first.number,)).fetchone()
+check(table.unrecorded_hands == old_hands and abs(table.unrecorded_pl - old_pl) < 1e-6
+      and dict(bjrecords.sessions()[-1].details)["Dealt by"] == "not recorded (before the dealers)",
+      f"play from before dealers were recorded: left out of the table, and counted in its note ({table.unrecorded_hands} hands)")
+check(data_views.dealer_header().split()[0] == "Dealer" and data_views.dealer_row(table.dealers[0]).count("$") == 4
+      and data_views.dealer_totals(table).startswith(f"{len(table.dealers)} dealer")
+      and data_views.unrecorded_note(table).startswith(f"Not included: {old_hands:,} hands from before dealers were recorded")
+      and data_views.unrecorded_note(bjrecords.DealerTable()) == "",
+      "the dealer table's rows, totals, and note")
 hist.close(s)
 
 other = Path(HOME) / "other.db"
@@ -419,7 +470,8 @@ s2.ensure_shoe_ready()
 play(s2, 3, seed=40)
 s2.history.close(s2)
 game = floor_m.blackjack_game(other)
-check(len(game.sessions()) == 1 and len(game.pl_history().rounds) == 3, "a blackjack started with --db FILE shows that file's records")
+check(len(game.sessions()) == 1 and len(game.pl_history().rounds) == 3 and [d.hands for d in game.dealers().dealers] == [3],
+      "a blackjack started with --db FILE shows that file's records")
 old = Path(HOME) / "old.db"
 sqlite3.connect(old).execute("pragma user_version = 2").connection.close()
 try:

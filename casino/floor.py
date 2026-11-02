@@ -12,7 +12,7 @@ Dreams Come True One Bet At A Time" in black. Under them sit the menus: GAMES
 on the left, to sit down at a game; on the right, BANK -- the casino bank
 everything plays from (casino/bank.py): its summary and transaction list,
 and deposits and withdrawals -- with DATA beneath it, for each game's
-Historical Session Data and P/L Charts (casino/data_views.py). The bottom 15%
+Historical Session Data, P/L Charts, and P/L by Dealer (casino/data_views.py). The bottom 15%
 of the screen holds no tables: just the balance, any message, the keys, and
 the intellectual-property notice on its purple strip.
 
@@ -43,7 +43,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from . import data_views, tui
 from .bank import Bank, Opening
 from .marquee import Marquee
-from .records import PLHistory, SessionRecord, money, signed
+from .records import DealerTable, PLHistory, SessionRecord, money, signed
 from .tui import Viewport
 
 # --------------------------------------------------------------------------
@@ -151,10 +151,12 @@ class Game:
     # player leaves: returns "quit" to close the casino, else ("floor", for
     # 'exit') it's back to the floor.
     launch: Callable[[], Optional[str]]
-    # Its history, for the DATA menu (casino/records.py): every session, and
-    # its P/L round by round. A game without one shows nothing recorded.
+    # Its history, for the DATA menu (casino/records.py): every session, its
+    # P/L round by round, and (a game with dealers) its results dealer by
+    # dealer. A game without one shows nothing recorded.
     sessions: Optional[Callable[[], List[SessionRecord]]] = None
     pl_history: Optional[Callable[[], PLHistory]] = None
+    dealers: Optional[Callable[[], DealerTable]] = None
 
 
 def blackjack_game(db_path: Optional[Path] = None) -> Game:
@@ -176,7 +178,12 @@ def blackjack_game(db_path: Optional[Path] = None) -> Game:
 
         return records.pl_history(db_path)
 
-    return Game("Classic Blackjack", "blackjack", launch, sessions, pl_history)
+    def dealers() -> DealerTable:
+        from blackjack import records
+
+        return records.dealers(db_path)
+
+    return Game("Classic Blackjack", "blackjack", launch, sessions, pl_history, dealers)
 
 
 def _blackjack_opening() -> Opening:
@@ -198,6 +205,7 @@ BANK_ITEMS = [
 DATA_ITEMS = [
     MenuItem("Historical Session Data", "data:sessions"),
     MenuItem("P/L Charts", "data:charts"),
+    MenuItem("P/L by Dealer", "data:dealers"),
 ]
 GAMES_MENU, BANK_MENU, DATA_MENU = 0, 1, 2
 # The menus' places on the floor: GAMES on the left; BANK over DATA on the right.
@@ -630,17 +638,22 @@ def prompt_amount(win, floor: Floor, action: str) -> None:
         curses.curs_set(0)
 
 
+DATA_WINDOWS = {  # action: (the game picker's title, the window)
+    "data:sessions": ("HISTORICAL SESSION DATA", data_views.show_sessions),
+    "data:charts": ("P/L CHARTS", data_views.show_chart),
+    "data:dealers": ("P/L BY DEALER", data_views.show_dealers),
+}
+
+
 def open_data(win, floor: Floor, action: str) -> None:
-    """DATA: choose a game, then show its sessions or its P/L chart."""
-    which = "HISTORICAL SESSION DATA" if action == "data:sessions" else "P/L CHARTS"
+    """DATA: choose a game, then show its sessions, its P/L chart, or its
+    P/L by dealer."""
+    which, show = DATA_WINDOWS[action]
     backdrop = lambda: draw(win, floor)  # noqa: E731
     game = data_views.pick_game(win, floor, which, backdrop)
     if game is None:
         return
-    if action == "data:sessions":
-        data_views.show_sessions(win, floor, game, backdrop)
-    else:
-        data_views.show_chart(win, floor, game, backdrop)
+    show(win, floor, game, backdrop)
 
 
 # --------------------------------------------------------------------------
