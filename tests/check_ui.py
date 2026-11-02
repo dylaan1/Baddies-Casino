@@ -7,6 +7,7 @@ keeps up."""
 import importlib.util
 import json
 import os
+import re
 import signal
 import sqlite3
 import sys
@@ -216,7 +217,46 @@ def find(g, text):
     return None
 
 
-lit = lambda g: (g.line_with("▶") or "")
+def lit(g):
+    """The highlighted menu line, box characters and the marquee's edge columns left out."""
+    for line in g.screen.display:
+        if "▶" in line[1:-1]:
+            return re.sub(r"[│┌┐└┘─]", "", line[1:-1]).strip()
+    return ""
+BULB = {"00ff00": "G", "ff0000": "R"}
+
+
+def edge(g, cells):
+    """The marquee along `cells`, as G / R / . -- None if the snapshot was taken mid-redraw (spacing or colors off)."""
+    run = "".join(BULB.get(g.screen.buffer[y][x].fg, "?") if g.screen.buffer[y][x].data == "█" else "." for y, x in cells)
+    lit = [i for i, ch in enumerate(run) if ch != "."]
+    ok = "?" not in run and all(b - a == 3 for a, b in zip(lit, lit[1:])) and all(run[a] != run[b] for a, b in zip(lit, lit[1:]))
+    return run if ok and len(lit) > 4 else None
+
+
+def steady(g, cells):
+    """A snapshot of the marquee along `cells` that isn't caught mid-redraw (a few tries)."""
+    for _ in range(10):
+        run = edge(g, cells)
+        if run:
+            return run
+        g.pump(0.05)
+    return None
+
+
+def moved(g, cells):
+    """How many cells the lights along `cells` moved between two snapshots (forward along `cells`), or None."""
+    for _ in range(8):
+        before = edge(g, cells)
+        g.pump(0.2)
+        after = edge(g, cells)
+        if before and after and before != after:
+            for k in range(1, 6):
+                if after[k:] == before[:-k]:
+                    return k
+    return None
+
+
 home = tempfile.mkdtemp(prefix="csbj-ui-floor-")
 g = Game(home, rows=60, cols=238, cmd=[sys.executable, "-m", "casino"])
 g.pump(2.5)
@@ -225,20 +265,41 @@ lines = g.screen.display
 check(screen.count("█") > 500 and "GAMES" in screen and "BANK" in screen and "Balance: $10,000.00" in screen,
       "the casino floor: the block-letter sign, the GAMES and BANK menus, and a new player's $10,000.00")
 check(lit(g).startswith("▶ Classic Blackjack") and "Leave Casino" in screen, "Classic Blackjack starts highlighted")
-sign_y, sign_x = find(g, "█")
-check(lines[0].strip() == "" and sign_y == 1 and g.screen.buffer[sign_y][sign_x].fg == "87ff00" and "▀" in lines[8] and lines[9].strip() == "",
-      "the sign starts a row from the top, in lime green, on one line (8 rows)")
-check(sign_x >= 4 and max(i for i, ch in enumerate(lines[1]) if ch == "█") <= 238 - 5, "...with room on either side")
-banner_y, _ = find(g, "Luxury Gaming and Amenities")
-purple = [x for x in range(238) if g.screen.buffer[banner_y][x].bg == "8700af"]
-check(lines[banner_y - 1].strip() == "" and purple and (purple[0], purple[-1]) == (63, 174),
-      f"a blank row, then the purple banner, 3 inches (63 columns) clear on either side: {purple[:1]}..{purple[-1:]}")
+inner = lambda line: line[1:-1]
+sign_x = inner(lines[2]).index("█") + 1
+check(inner(lines[1]).strip() == "" and g.screen.buffer[2][sign_x].fg == "87ff00" and "▀" in lines[9] and inner(lines[10]).strip() == "",
+      "inside the marquee, a blank row, then the sign (one line, 8 rows) in lime green")
+check(sign_x >= 4 and max(i for i, ch in enumerate(lines[2]) if ch == "█" and 0 < i < 237) <= 238 - 5, "...with room on either side")
+banner_y, banner_x = find(g, "Luxury Gaming & Amenities | Making Your Dreams Come True One Bet At A Time")
+lime = [x for x in range(238) if g.screen.buffer[banner_y][x].bg == "87ff00"]
+check(banner_y == 11 and inner(lines[banner_y - 1]).strip() == "" and lime and (lime[0], lime[-1]) == (63, 174)
+      and g.screen.buffer[banner_y][banner_x].fg == "000000",
+      f"a blank row, then the lime-green banner in black, 3 inches (63 columns) clear on either side: {lime[:1]}..{lime[-1:]}")
 games_y, games_x = find(g, "┌─ GAMES")
+bank_y, bank_x = find(g, "┌─ BANK")
+data_y, data_x = find(g, "┌─ DATA")
 right_edge = max(x for x, ch in enumerate(lines[games_y]) if ch == "┐")
-check(games_y == banner_y + 2 and games_x == 21 and right_edge == 238 - 21 - 1, "the menus run from 1 inch (21 columns) in from each side")
+check(games_y == bank_y == banner_y + 2 and games_x == 21 and right_edge == 238 - 21 - 1, "the menus run from 1 inch (21 columns) in from each side")
+check("Transactions" in lines[bank_y + 4] and lines[bank_y + 5][bank_x] == "└" and data_y == bank_y + 7 and data_x == bank_x
+      and "Historical Session Data" in lines[data_y + 1] and "P/L Charts" in lines[data_y + 2],
+      "BANK ends right after Transactions; DATA starts below it: Historical Session Data, P/L Charts")
+games_bottom = next(y for y in range(games_y + 1, 60) if lines[y][games_x] == "└")
+check(games_bottom == 50 and lines[50][data_x] == "└", "GAMES and DATA end level, where the bottom 15% begins")
 check(not any(ch in line for line in lines[51:] for ch in "┌┐└┘│"), "the bottom 15% of the screen (the last 9 rows) holds no tables")
-check(lines[-1].strip().startswith("Intellectual Property of Dylan Behseresht, 2026.") and lines[-1].strip().endswith("expressly prohibited"),
-      "the intellectual-property notice is on the bottom line")
+notice = inner(lines[58]).strip()
+notice_x = lines[58].index("Intellectual")
+purple = [x for x in range(1, 237) if g.screen.buffer[58][x].bg == "8700af"]
+check(notice.startswith("Intellectual Property of Dylan Behseresht, 2026.") and notice.endswith("expressly prohibited")
+      and purple and purple[0] == notice_x - 1 and purple[-1] == notice_x + len(notice),
+      "the notice sits on the row above the marquee, on a purple strip the length of its text")
+check(set(inner(lines[59])) <= {" ", "█"} and set(inner(lines[0])) <= {" ", "█"}, "the top and bottom rows hold nothing but the marquee")
+top_row = [(0, x) for x in range(1, 237)]
+left_column = [(y, 0) for y in range(58, 0, -1)]                       # read bottom to top
+right_column = [(y, 237) for y in range(1, 59)]                        # read top to bottom
+check(steady(g, top_row) is not None and steady(g, left_column) is not None,
+      "the marquee lights every third outer cell, alternating bright green and red")
+k_top, k_right, k_left = moved(g, top_row), moved(g, right_column), moved(g, left_column)
+check(k_top and k_right and k_left, f"...and they chase clockwise: right along the top, down the right, up the left ({k_top}, {k_right}, {k_left} cells)")
 
 g.send("\r", 3.5)
 check("Bankroll: $10,000.00" in g.text(), "Enter on Classic Blackjack launches the game, playing from the bank's balance")
@@ -289,6 +350,31 @@ listing = rows[rows.index("TRANSACTIONS"):] if "TRANSACTIONS" in rows else ""
 check(listing and listing.index("Withdrawal") < listing.index("Deposit") < listing.index("Opening"), "Transactions lists them, newest first")
 g.send("q", 0.6)
 check("TRANSACTIONS" not in g.text(), "q closes the list")
+
+g.send(DOWN, 0.4)
+check(lit(g).endswith("▶ Historical Session Data"), "Down from Transactions carries on into DATA")
+g.send("\r", 0.8)
+check("HISTORICAL SESSION DATA" in g.text() and g.line_with("▶ Classic Blackjack") is not None, "Historical Session Data asks which game, listing them")
+g.send("\r", 1.2)
+table = g.text()
+check("CLASSIC BLACKJACK — HISTORICAL SESSION DATA" in table and "1 session" in table and g.line_with("Main P/L") is not None,
+      "...then shows that game's sessions: the totals and the table")
+g.send("\r", 0.8)
+check(g.line_with("SESSION #") is not None and g.line_with("Max drawdown") is not None and g.line_with("Dealer busts") is not None,
+      "Enter on a session opens its detail")
+g.send("\x1b", 0.6)
+g.send("\x1b", 0.8)
+check("Leave Casino" in g.text() and "SESSION" not in g.text(), "Esc closes the detail, then the table")
+g.send(DOWN, 0.4)
+g.send("\r", 0.8)
+check("P/L CHARTS" in g.text(), "P/L Charts asks which game too")
+g.send("\r", 1.5)
+chart = g.text()
+check("CLASSIC BLACKJACK — LIFETIME P/L" in chart and "round 1" in chart and "now " in chart
+      and any(0x2800 < ord(ch) <= 0x28FF for ch in chart) and "┈" in chart,
+      "...then draws its P/L line, the $0 line, and the round axis")
+g.send("\x1b", 0.8)
+check("Leave Casino" in g.text(), "Esc goes back to the floor")
 g.send(LEFT, 0.4)
 g.send("\r", 3.5)
 check("Bankroll: $" in g.text(), "back into Classic Blackjack")
@@ -303,7 +389,7 @@ g.pump(2.5)
 g.send("\r", 4.0)
 g.to_idle()
 g.command("exit", 3.0)
-check("Luxury Gaming and Amenities" in g.text() and g.alive(), "'exit' from blackjack started on its own (python3 -m blackjack) opens the casino floor")
+check("Luxury Gaming & Amenities" in g.text() and g.alive(), "'exit' from blackjack started on its own (python3 -m blackjack) opens the casino floor")
 g.send("\r", 3.5)
 g.send("\r", 4.0)
 g.to_idle()
@@ -328,7 +414,7 @@ g.to_idle()
 g.command("bank add 100", 1.0)
 check(g.line_with("Bankroll +$100.00") is not None, "...where in-game commands work as usual")
 g.command("exit", 3.0)
-check("Luxury Gaming and Amenities" in g.text(), "...and 'exit' goes to the casino floor")
+check("Luxury Gaming & Amenities" in g.text(), "...and 'exit' goes to the casino floor")
 g.send("q", 1.0)
 check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "...which q closes")
 c = sqlite3.connect(os.path.join(here, "practice.db"))
@@ -342,7 +428,7 @@ check(abs(bank["game_winnings"]["blackjack"] - table_pl) < 1e-6 and abs(bank["de
 
 g = Game(home, rows=60, cols=238, cmd=[sys.executable, str(REPO / "bin" / "casino")], cwd=here)
 g.pump(2.5)
-check("Luxury Gaming and Amenities" in g.text() and f"Balance: ${bank['balance']:,.2f}" in g.text(),
+check("Luxury Gaming & Amenities" in g.text() and f"Balance: ${bank['balance']:,.2f}" in g.text(),
       "`casino` (bin/casino) from another folder opens the floor, on the same bank")
 g.send("\r", 3.5)
 check("Bankroll: $" in g.text(), "...where Classic Blackjack starts as usual")

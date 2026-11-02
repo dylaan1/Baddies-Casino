@@ -3,17 +3,23 @@ starts.
 
     python3 -m casino
 
-The BADDIE'S CASINO sign runs across the top on one line, in lime-green
-block letters one and a half times their original size, over a purple "Luxury Gaming and Amenities" banner, and under them
-sit two menus side by side: GAMES, to sit down at a game, and BANK, for the
-casino bank everything plays from (casino/bank.py) -- its summary and
-transaction list, and deposits and withdrawals. The bottom 15% of the screen
-holds no tables: just the balance, any message, the keys, and on the last
-line the intellectual-property notice.
+A marquee runs round the very edge of the screen: green and red lights,
+two dark cells apart, chasing clockwise like an old Vegas sign
+(casino/marquee.py). Inside it, a blank row, then the BADDIE'S CASINO sign on
+one line in lime-green block letters, one and a half times their original
+size, over a lime-green banner -- "Luxury Gaming & Amenities | Making Your
+Dreams Come True One Bet At A Time" in black. Under them sit the menus: GAMES
+on the left, to sit down at a game; on the right, BANK -- the casino bank
+everything plays from (casino/bank.py): its summary and transaction list,
+and deposits and withdrawals -- with DATA beneath it, for each game's
+Historical Session Data and P/L Charts (casino/data_views.py). The bottom 15%
+of the screen holds no tables: just the balance, any message, the keys, and
+the intellectual-property notice on its purple strip.
 
-Up/Down move through a menu and stop at its first and last option, so the
-highlight never falls off the end; a menu longer than its box scrolls to keep
-the highlight in view. Left/Right or Tab switch menus, Enter picks the
+Up/Down move through a menu and stop at its ends, so the highlight never
+falls off -- except that BANK runs on into DATA below it, and DATA back up
+into BANK; a menu longer than its box scrolls to keep the highlight in view.
+Left/Right switch sides, Tab goes round all three menus, Enter picks the
 highlighted option (so does clicking it once it's highlighted), and q leaves
 the casino. Clicking anywhere off the menus clears the highlight; an arrow key
 or a click on an option brings it back.
@@ -31,11 +37,14 @@ import signal
 import sys
 import textwrap
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from . import data_views, tui
 from .bank import Bank, Opening
+from .marquee import Marquee
+from .records import PLHistory, SessionRecord, money, signed
+from .tui import Viewport
 
 # --------------------------------------------------------------------------
 # The sign
@@ -113,58 +122,10 @@ def fit_sign(width: int, height: int) -> List[str]:
 # --------------------------------------------------------------------------
 
 
-class Viewport:
-    """A cursor over `count` rows, `rows` of them visible at once. The cursor
-    stops at the first and last row (it never runs off either end), and the
-    view scrolls just enough to keep it visible."""
-
-    def __init__(self, count: int, rows: int):
-        self.count = count
-        self.rows = max(1, rows)
-        self.cursor = 0
-        self.top = 0
-
-    def move(self, delta: int) -> None:
-        self.cursor = max(0, min(self.count - 1, self.cursor + delta)) if self.count else 0
-        self._follow()
-
-    def page(self, direction: int) -> None:
-        self.move(direction * self.rows)
-
-    def home(self) -> None:
-        self.move(-self.count)
-
-    def end(self) -> None:
-        self.move(self.count)
-
-    def resize(self, rows: int) -> None:
-        self.rows = max(1, rows)
-        self._follow()
-
-    def _follow(self) -> None:
-        if self.cursor < self.top:
-            self.top = self.cursor
-        elif self.cursor >= self.top + self.rows:
-            self.top = self.cursor - self.rows + 1
-        self.top = max(0, min(self.top, max(0, self.count - self.rows)))
-
-    @property
-    def visible(self) -> range:
-        return range(self.top, min(self.count, self.top + self.rows))
-
-    @property
-    def more_above(self) -> bool:
-        return self.top > 0
-
-    @property
-    def more_below(self) -> bool:
-        return self.top + self.rows < self.count
-
-
 @dataclass(frozen=True)
 class MenuItem:
     label: str
-    action: str  # what picking it does -- see Floor.perform
+    action: str  # what picking it does -- see _floor_main
 
 
 class Menu:
@@ -190,6 +151,10 @@ class Game:
     # player leaves: returns "quit" to close the casino, else ("floor", for
     # 'exit') it's back to the floor.
     launch: Callable[[], Optional[str]]
+    # Its history, for the DATA menu (casino/records.py): every session, and
+    # its P/L round by round. A game without one shows nothing recorded.
+    sessions: Optional[Callable[[], List[SessionRecord]]] = None
+    pl_history: Optional[Callable[[], PLHistory]] = None
 
 
 def blackjack_game(db_path: Optional[Path] = None) -> Game:
@@ -201,7 +166,17 @@ def blackjack_game(db_path: Optional[Path] = None) -> Game:
 
         return run(db_path)
 
-    return Game("Classic Blackjack", "blackjack", launch)
+    def sessions() -> List[SessionRecord]:
+        from blackjack import records
+
+        return records.sessions(db_path)
+
+    def pl_history() -> PLHistory:
+        from blackjack import records
+
+        return records.pl_history(db_path)
+
+    return Game("Classic Blackjack", "blackjack", launch, sessions, pl_history)
 
 
 def _blackjack_opening() -> Opening:
@@ -220,24 +195,36 @@ BANK_ITEMS = [
     MenuItem("Withdraw", "withdraw"),
     MenuItem("Transactions", "transactions"),
 ]
+DATA_ITEMS = [
+    MenuItem("Historical Session Data", "data:sessions"),
+    MenuItem("P/L Charts", "data:charts"),
+]
+GAMES_MENU, BANK_MENU, DATA_MENU = 0, 1, 2
+# The menus' places on the floor: GAMES on the left; BANK over DATA on the right.
+COLUMNS: Tuple[Tuple[int, ...], ...] = ((GAMES_MENU,), (BANK_MENU, DATA_MENU))
 
 # A terminal can't measure inches, so the floor's margins are set in columns
 # per inch: about 21 for Monaco 10 pt on a 13-inch MacBook Pro at its default
 # scaled resolution. A different font size or display scaling changes it.
 COLUMNS_PER_INCH = 21
 BANNER_MARGIN_IN = 3  # inches clear on either side of the banner
-MENU_MARGIN_IN = 1  # inches between each menu and its side of the screen
-MENU_GAP = 4  # columns between the two menus
-MIN_MENU_W = 26
+MENU_MARGIN_IN = 1  # inches between each column of menus and its side of the screen
+MENU_GAP = 4  # columns between the two columns of menus
+MENU_STACK_GAP = 1  # rows between BANK and DATA
+MIN_MENU_W = 28  # room for " ▶ Historical Session Data" inside the box
 MIN_MENU_ROWS = 4  # options a menu shows before the sign is made smaller to fit them; past this, menus scroll
 BOTTOM_CLEAR = 0.15  # the bottom 15% of the screen holds no tables
-BANNER_TEXT = "Luxury Gaming and Amenities"
+EDGE = 1  # the marquee's rows and columns, round the outside, that nothing else uses
+BANNER_TEXT = "Luxury Gaming & Amenities | Making Your Dreams Come True One Bet At A Time"
 LEAVE_TEXT = "q  Leave Casino"
-FOOTER = "↑↓ choose   ←→/Tab switch menu   Enter select   click away to clear   q leave"
+FOOTER = "↑↓ choose   ←→ switch side   Tab next menu   Enter select   click away to clear   q leave"
+SHORT_FOOTER = "↑↓ choose  ←→ side  Tab menu  Enter select  q leave"  # for a window too narrow for FOOTER
 NOTICE = (
     "Intellectual Property of Dylan Behseresht, 2026. Any unauthorized redistribution of this software without "
-    "express written consent is expressly prohibited"
+    "express written consent is expressly prohibited."
 )
+
+Rect = Tuple[int, int, int, int]  # (y, x, height, width)
 
 
 @dataclass
@@ -249,15 +236,13 @@ class Layout:
     banner_y: int
     banner_x: int
     banner_w: int
-    boxes: List[Tuple[int, int]]  # each menu box's top-left (y, x)
-    box_w: int
-    box_h: int
+    rects: List[Rect]  # each menu's box, by menu: GAMES, BANK, DATA
     status_y: int  # balance (left) and LEAVE_TEXT (right), just under the boxes
     message_y: int
     leave_x: int
     footer_y: int  # the keys
-    notice: List[str]  # NOTICE, as one line or (in a narrow window) wrapped, ending on the bottom line
-    notice_y: int  # the row its first line is on
+    notice: List[str]  # NOTICE, as one line or (in a narrow window) wrapped
+    notice_y: int  # the row its first line is on: the last ones end just above the marquee
     fits: bool = True
 
 
@@ -269,11 +254,14 @@ class Floor:
         self.games = list(GAMES if games is None else games)
         self.menus = [
             Menu("GAMES", [MenuItem(g.name, f"game:{i}") for i, g in enumerate(self.games)], MIN_MENU_ROWS),
-            Menu("BANK", list(BANK_ITEMS), MIN_MENU_ROWS),
+            Menu("BANK", list(BANK_ITEMS), len(BANK_ITEMS)),
+            Menu("DATA", list(DATA_ITEMS), len(DATA_ITEMS)),
         ]
-        self.focus: Optional[int] = 0  # the menu holding the highlight, or None once it's been clicked off
-        self.last_focus = 0
+        self.focus: Optional[int] = GAMES_MENU  # the menu holding the highlight, or None once it's been clicked off
+        self.last_focus = GAMES_MENU
+        self._last_in_column = [col[0] for col in COLUMNS]  # the menu last used on each side
         self.message = ""
+        self.marquee = Marquee()
         self._bank_opener = bank_opener or (lambda: Bank.open(opening=_blackjack_opening))
         self.bank: Optional[Bank] = None
         self.layout_cache: Optional[Layout] = None
@@ -291,50 +279,61 @@ class Floor:
     # ---- layout ----
 
     def layout(self, height: int, width: int) -> Layout:
-        """Top to bottom: a blank row, the sign, a blank row, the banner, a
-        blank row, then the menu boxes down to where the bottom 15% of the
-        screen begins. That bottom stretch holds the status row (balance,
-        Leave Casino), the message row, the keys, and the notice on the very
-        last row. Across, each menu runs from MENU_MARGIN_IN inches in from its
-        side of the screen to MENU_GAP columns from the other, and the banner
-        keeps BANNER_MARGIN_IN inches clear on either side. In a smaller
-        window the sign shrinks first, then the margins; menus with more
-        options than they have room for scroll."""
+        """Inside the marquee (the outermost rows and columns), top to
+        bottom: a blank row, the sign, a blank row, the banner, a blank row,
+        then the menus down to where the bottom 15% of the screen begins --
+        GAMES down the left; BANK, just tall enough for its options, over DATA
+        on the right, the two ending level. That bottom stretch holds the
+        status row (balance, Leave Casino), the message row, the keys, and
+        the notice just above the marquee. Across, each side's menus run from
+        MENU_MARGIN_IN inches in from the screen's edge to MENU_GAP columns
+        from the other side's, and the banner keeps BANNER_MARGIN_IN inches
+        clear on either side. In a smaller window the sign shrinks first,
+        then the margins; menus with more options than room scroll."""
         inch = COLUMNS_PER_INCH
-        notice = textwrap.wrap(NOTICE, max(20, width - 2))
-        bottom = max(3 + len(notice), math.ceil(height * BOTTOM_CLEAR))  # kept clear of tables: status, message, keys, notice
+        notice = textwrap.wrap(NOTICE, max(20, width - 6))
+        # kept clear of tables: status, message, keys, the notice, the marquee
+        bottom = max(4 + len(notice), math.ceil(height * BOTTOM_CLEAR))
         box_last = height - bottom - 1  # the last row a box may use
 
-        count = len(self.menus)
-        margin = min(MENU_MARGIN_IN * inch, max(0, (width - (count - 1) * MENU_GAP - count * MIN_MENU_W) // 2))
-        box_w = (width - 2 * margin - (count - 1) * MENU_GAP) // count
-        xs = [margin + m * (box_w + MENU_GAP) for m in range(count - 1)] + [width - margin - box_w]
+        sides = len(COLUMNS)
+        margin = min(MENU_MARGIN_IN * inch, max(EDGE + 1, (width - (sides - 1) * MENU_GAP - sides * MIN_MENU_W) // 2))
+        box_w = (width - 2 * margin - (sides - 1) * MENU_GAP) // sides
+        xs = [margin + i * (box_w + MENU_GAP) for i in range(sides - 1)] + [width - margin - box_w]
 
-        banner_margin = min(BANNER_MARGIN_IN * inch, max(0, (width - len(BANNER_TEXT) - 6) // 2))
+        banner_margin = min(BANNER_MARGIN_IN * inch, max(EDGE + 1, (width - len(BANNER_TEXT) - 6) // 2))
 
-        sign_y = 1
+        sign_y = EDGE + 1
         sign = fit_sign(width, (box_last + 1) - sign_y - 3 - (MIN_MENU_ROWS + 2))  # 3: blank, banner, blank
         banner_y = sign_y + len(sign) + 1
         box_y = banner_y + 2
-        box_h = box_last - box_y + 1
-        for m in self.menus:
-            m.view.resize(box_h - 2)
+        column_h = box_last - box_y + 1
+
+        bank_rows = len(self.menus[BANK_MENU].items)
+        data_min = len(self.menus[DATA_MENU].items) + 2
+        bank_h = max(3, min(bank_rows + 2, column_h - MENU_STACK_GAP - data_min))
+        data_y = box_y + bank_h + MENU_STACK_GAP
+        rects = [
+            (box_y, xs[0], column_h, box_w),
+            (box_y, xs[1], bank_h, box_w),
+            (data_y, xs[1], box_last - data_y + 1, box_w),
+        ]
+        for menu, (_, _, h, _) in zip(self.menus, rects):
+            menu.view.resize(h - 2)
         lay = Layout(
             sign=sign,
             sign_y=sign_y,
             banner_y=banner_y,
             banner_x=banner_margin,
             banner_w=width - 2 * banner_margin,
-            boxes=[(box_y, x) for x in xs],
-            box_w=box_w,
-            box_h=box_h,
+            rects=rects,
             status_y=box_last + 1,
             message_y=box_last + 2,
             leave_x=xs[-1] + box_w - len(LEAVE_TEXT) - 1,
-            footer_y=height - len(notice) - 1,
+            footer_y=height - EDGE - len(notice) - 1,
             notice=notice,
-            notice_y=height - len(notice),
-            fits=box_w >= MIN_MENU_W and box_h >= 3,
+            notice_y=height - EDGE - len(notice),
+            fits=box_w >= MIN_MENU_W and min(h for _, _, h, _ in rects) >= 3,
         )
         self.layout_cache = lay
         return lay
@@ -345,20 +344,41 @@ class Floor:
         lay = self.layout_cache
         if lay is None:
             return None
-        for m, (by, bx) in enumerate(lay.boxes):
-            if by <= y < by + lay.box_h and bx <= x < bx + lay.box_w:
+        for m, (by, bx, bh, bw) in enumerate(lay.rects):
+            if by <= y < by + bh and bx <= x < bx + bw:
                 row = y - by - 1
                 view = self.menus[m].view
-                if 0 <= row < view.rows and view.top + row < view.count and 0 < x - bx < lay.box_w - 1:
+                if 0 <= row < view.rows and view.top + row < view.count and 0 < x - bx < bw - 1:
                     return m, view.top + row
                 return m, None
         return None
 
     # ---- input ----
 
+    @staticmethod
+    def _column(menu: int) -> int:
+        return next(i for i, col in enumerate(COLUMNS) if menu in col)
+
     def _refocus(self, menu: Optional[int] = None) -> None:
         self.focus = self.last_focus if menu is None else menu
         self.last_focus = self.focus
+        self._last_in_column[self._column(self.focus)] = self.focus
+
+    def _step(self, direction: int) -> None:
+        """Up (-1) or Down (1) in the focused menu -- past its last option
+        into the menu below it on that side, past its first into the one
+        above (BANK and DATA); anywhere else the highlight stops at the end."""
+        view = self.menus[self.focus].view
+        column = COLUMNS[self._column(self.focus)]
+        place = column.index(self.focus)
+        if direction > 0 and view.cursor == view.count - 1 and place + 1 < len(column):
+            self._refocus(column[place + 1])
+            self.menus[self.focus].view.home()
+        elif direction < 0 and view.cursor == 0 and place > 0:
+            self._refocus(column[place - 1])
+            self.menus[self.focus].view.end()
+        else:
+            view.move(direction)
 
     def key(self, ch: int) -> Optional[str]:
         """Apply a key press; returns the action to perform, if any."""
@@ -367,29 +387,26 @@ class Floor:
         if ch == 27:  # Esc: same as clicking off
             self.focus = None
             return None
+        if self.focus is None and ch in (curses.KEY_LEFT, curses.KEY_RIGHT, 9, curses.KEY_BTAB, curses.KEY_UP,
+                                         curses.KEY_DOWN, curses.KEY_PPAGE, curses.KEY_NPAGE, curses.KEY_HOME,
+                                         curses.KEY_END):
+            self._refocus()  # the first key after clicking off just brings the highlight back
+            return None
+        if self.focus is None:
+            return None
         if ch in (curses.KEY_LEFT, curses.KEY_RIGHT):
-            step = -1 if ch == curses.KEY_LEFT else 1
-            self._refocus(None if self.focus is None else max(0, min(len(self.menus) - 1, self.focus + step)))
+            side = max(0, min(len(COLUMNS) - 1, self._column(self.focus) + (-1 if ch == curses.KEY_LEFT else 1)))
+            self._refocus(self._last_in_column[side])
             return None
-        if ch in (9, curses.KEY_BTAB):  # Tab / Shift-Tab go round
-            step = 1 if ch == 9 else -1
-            self._refocus(None if self.focus is None else (self.focus + step) % len(self.menus))
+        if ch in (9, curses.KEY_BTAB):  # Tab / Shift-Tab go round every menu
+            self._refocus((self.focus + (1 if ch == 9 else -1)) % len(self.menus))
             return None
-        moves = {
-            curses.KEY_UP: lambda v: v.move(-1),
-            curses.KEY_DOWN: lambda v: v.move(1),
-            curses.KEY_PPAGE: lambda v: v.page(-1),
-            curses.KEY_NPAGE: lambda v: v.page(1),
-            curses.KEY_HOME: lambda v: v.home(),
-            curses.KEY_END: lambda v: v.end(),
-        }
-        if ch in moves:
-            if self.focus is None:
-                self._refocus()  # the first arrow after clicking off just brings the highlight back
-            else:
-                moves[ch](self.menus[self.focus].view)
+        if ch in (curses.KEY_UP, curses.KEY_DOWN):
+            self._step(-1 if ch == curses.KEY_UP else 1)
             return None
-        if ch in (10, 13, curses.KEY_ENTER, ord(" ")) and self.focus is not None:
+        if self.menus[self.focus].view.key(ch):  # PgUp/PgDn/Home/End, within the menu
+            return None
+        if ch in (10, 13, curses.KEY_ENTER, ord(" ")):
             return self.menus[self.focus].current.action
         return None
 
@@ -416,24 +433,24 @@ class Floor:
         return None
 
     def wheel(self, y: int, x: int, direction: int) -> None:
-        """Scroll wheel over a menu: move its highlight a row."""
+        """Scroll wheel over a menu: move the highlight a row, as Up/Down do."""
         hit = self.item_at(y, x)
         if hit is not None:
             self._refocus(hit[0])
-            self.menus[hit[0]].view.move(direction)
+            self._step(direction)
 
     # ---- the bank's figures, as the floor shows them ----
 
     def summary_lines(self) -> List[Tuple[str, str]]:
         bank = self.bank
-        rows = [("Balance", _money(bank.balance)), ("", "")]
-        rows.append(("Won at the games", _signed(bank.total_winnings)))
+        rows = [("Balance", money(bank.balance)), ("", "")]
+        rows.append(("Won at the games", signed(bank.total_winnings)))
         names = {g.bank_key: g.name for g in self.games}
         for key in list(names) + sorted(k for k in bank.game_winnings if k not in names):
-            rows.append((f"  {names.get(key, key.title())}", _signed(bank.game_winnings.get(key, 0.0))))
+            rows.append((f"  {names.get(key, key.title())}", signed(bank.game_winnings.get(key, 0.0))))
         rows += [
-            ("Deposited", _money(bank.deposited)),
-            ("Withdrawn", _money(bank.withdrawn)),
+            ("Deposited", money(bank.deposited)),
+            ("Withdrawn", money(bank.withdrawn)),
             ("", ""),
             ("Balance = deposited - withdrawn + won", ""),
         ]
@@ -445,8 +462,8 @@ class Floor:
         for t in reversed(self.bank.transactions):
             kind = {"opening": "Opening", "deposit": "Deposit", "withdrawal": "Withdrawal"}.get(t.get("kind"), str(t.get("kind")))
             lines.append(
-                f"{_local_time(t.get('at', '')):<17}  {kind:<10}  {_signed(float(t.get('amount', 0))):>14}  "
-                f"{_money(float(t.get('balance', 0))):>14}  {t.get('note', '')}"
+                f"{data_views.local_time(t.get('at', '')):<17}  {kind:<10}  {signed(float(t.get('amount', 0))):>14}  "
+                f"{money(float(t.get('balance', 0))):>14}  {t.get('note', '')}"
             )
         return lines
 
@@ -456,26 +473,11 @@ class Floor:
         if amount <= 0:
             return "Enter an amount above $0."
         if action == "withdraw" and amount > bank.balance + 1e-9:
-            return f"You can withdraw at most {_money(max(bank.balance, 0.0))}."
+            return f"You can withdraw at most {money(max(bank.balance, 0.0))}."
         ok = bank.deposit(amount, "Casino floor") if action == "deposit" else bank.withdraw(amount, "Casino floor")
         verb = "Deposited" if action == "deposit" else "Withdrew"
         note = "" if ok else f" (but the bank file couldn't be saved: {bank.error})"
-        return f"{verb} {_money(amount)} -- balance {_money(bank.balance)}{note}"
-
-
-def _money(x: float) -> str:
-    return f"-${-x:,.2f}" if x < 0 else f"${x:,.2f}"
-
-
-def _signed(x: float) -> str:
-    return f"-${-x:,.2f}" if x < 0 else f"+${x:,.2f}"
-
-
-def _local_time(stamp: str) -> str:
-    try:
-        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
-    except ValueError:
-        return stamp
+        return f"{verb} {money(amount)} -- balance {money(bank.balance)}{note}"
 
 
 def parse_amount(text: str) -> Optional[float]:
@@ -490,63 +492,6 @@ def parse_amount(text: str) -> Optional[float]:
 # Drawing
 # --------------------------------------------------------------------------
 
-_SIGN_PAIR, _FOCUS_PAIR, _GOOD_PAIR, _BAD_PAIR, _BANNER_PAIR = 1, 2, 3, 4, 5
-# 256-color palette entries, where the terminal has them (else the closest of
-# the basic eight: green, and white on magenta).
-LIME = 118  # #87ff00
-PURPLE = 91  # #8700af
-BRIGHT_WHITE = 231
-
-
-def _init_colors() -> None:
-    if not curses.has_colors():
-        return
-    curses.start_color()
-    try:
-        curses.use_default_colors()
-        bg = -1
-    except curses.error:
-        bg = curses.COLOR_BLACK
-    rich = curses.COLORS >= 256
-    curses.init_pair(_SIGN_PAIR, LIME if rich else curses.COLOR_GREEN, bg)
-    curses.init_pair(_BANNER_PAIR, BRIGHT_WHITE if rich else curses.COLOR_WHITE, PURPLE if rich else curses.COLOR_MAGENTA)
-    curses.init_pair(_FOCUS_PAIR, curses.COLOR_CYAN, bg)
-    curses.init_pair(_GOOD_PAIR, curses.COLOR_GREEN, bg)
-    curses.init_pair(_BAD_PAIR, curses.COLOR_RED, bg)
-
-
-def _color(pair: int) -> int:
-    return curses.color_pair(pair) if curses.has_colors() else 0
-
-
-def _put(win, y: int, x: int, text: str, attr: int = 0) -> None:
-    max_y, max_x = win.getmaxyx()
-    if y < 0 or y >= max_y or x >= max_x:
-        return
-    if x < 0:
-        text, x = text[-x:], 0
-    available = max_x - x - 1  # curses can't write into the very last cell
-    if available <= 0:
-        return
-    try:
-        win.addstr(y, x, text[:available], attr)
-    except curses.error:
-        pass
-
-
-def _box(win, y: int, x: int, h: int, w: int, title: str, attr: int, up: bool = False, down: bool = False) -> None:
-    top = f"┌─ {title} " + "─" * (w - len(title) - 5) + "┐"
-    if up:
-        top = top[:-2] + "▲┐"
-    bottom = "└" + "─" * (w - 2) + "┘"
-    if down:
-        bottom = bottom[:-2] + "▼┘"
-    _put(win, y, x, top, attr)
-    for row in range(1, h - 1):
-        _put(win, y + row, x, "│", attr)
-        _put(win, y + row, x + w - 1, "│", attr)
-    _put(win, y + h - 1, x, bottom, attr)
-
 
 def draw(win, floor: Floor) -> None:
     win.erase()
@@ -554,68 +499,58 @@ def draw(win, floor: Floor) -> None:
     lay = floor.layout(height, width)
     if not lay.fits:
         msg = "Make the window bigger to step onto the casino floor"
-        _put(win, height // 2, max(0, (width - len(msg)) // 2), msg, curses.A_BOLD)
+        tui.put(win, height // 2, max(0, (width - len(msg)) // 2), msg, curses.A_BOLD)
+        floor.marquee.draw(win)
         win.refresh()
         return
 
     for i, row in enumerate(lay.sign):
-        _put(win, lay.sign_y + i, max(0, (width - len(row)) // 2), row, _color(_SIGN_PAIR) | curses.A_BOLD)
-    _put(win, lay.banner_y, lay.banner_x, BANNER_TEXT.center(lay.banner_w), _color(_BANNER_PAIR) | curses.A_BOLD)
+        tui.put(win, lay.sign_y + i, max(0, (width - len(row)) // 2), row, tui.color(tui.SIGN) | curses.A_BOLD)
+    tui.put(win, lay.banner_y, lay.banner_x, BANNER_TEXT.center(lay.banner_w), tui.color(tui.BANNER) | curses.A_BOLD)
 
-    for m, (menu, (by, bx)) in enumerate(zip(floor.menus, lay.boxes)):
+    for m, (menu, (by, bx, bh, bw)) in enumerate(zip(floor.menus, lay.rects)):
         focused = floor.focus == m
-        border = (_color(_FOCUS_PAIR) | curses.A_BOLD) if focused else 0
+        border = (tui.color(tui.FOCUS) | curses.A_BOLD) if focused else 0
         view = menu.view
-        _box(win, by, bx, lay.box_h, lay.box_w, menu.title, border, view.more_above, view.more_below)
-        _put(win, by, bx + 3, menu.title, curses.A_BOLD | (_color(_FOCUS_PAIR) if focused else 0))
+        tui.box(win, by, bx, bh, bw, menu.title, border, view.more_above, view.more_below)
+        tui.put(win, by, bx + 3, menu.title, curses.A_BOLD | (tui.color(tui.FOCUS) if focused else 0))
         for row, index in enumerate(view.visible):
             lit = focused and index == view.cursor
             text = f" {'▶' if lit else ' '} {menu.items[index].label}"
-            _put(win, by + 1 + row, bx + 1, text.ljust(lay.box_w - 2), curses.A_REVERSE if lit else 0)
+            tui.put(win, by + 1 + row, bx + 1, text.ljust(bw - 2)[: bw - 2], curses.A_REVERSE if lit else 0)
 
-    left_x = lay.boxes[0][1] + 1
-    _put(win, lay.status_y, left_x, "Balance:", curses.A_BOLD)
+    left_x = lay.rects[GAMES_MENU][1] + 1
+    tui.put(win, lay.status_y, left_x, "Balance:", curses.A_BOLD)
     if floor.bank is not None:
         balance = floor.bank.balance
-        _put(win, lay.status_y, left_x + 9, _money(balance), _color(_GOOD_PAIR if balance >= 0 else _BAD_PAIR) | curses.A_BOLD)
-    _put(win, lay.status_y, lay.leave_x, LEAVE_TEXT, curses.A_DIM)
+        tui.put(win, lay.status_y, left_x + 9, money(balance), tui.color(tui.GOOD if balance >= 0 else tui.BAD) | curses.A_BOLD)
+    tui.put(win, lay.status_y, lay.leave_x, LEAVE_TEXT, curses.A_DIM)
     if floor.message:
-        _put(win, lay.message_y, max(0, (width - len(floor.message)) // 2), floor.message)
-    _put(win, lay.footer_y, max(0, (width - len(FOOTER)) // 2), FOOTER, curses.A_DIM)
+        tui.put(win, lay.message_y, max(0, (width - len(floor.message)) // 2), floor.message)
+    footer = FOOTER if len(FOOTER) <= width - 4 else SHORT_FOOTER
+    tui.put(win, lay.footer_y, max(EDGE + 1, (width - len(footer)) // 2), footer[: width - 4], curses.A_DIM)
     for i, line in enumerate(lay.notice):
-        _put(win, lay.notice_y + i, max(0, (width - len(line)) // 2), line)
+        strip = f" {line} "  # the purple strip runs the length of the text, a space either side
+        tui.put(win, lay.notice_y + i, max(EDGE + 1, (width - len(strip)) // 2), strip, tui.color(tui.NOTICE) | curses.A_BOLD)
+    floor.marquee.draw(win)
     win.refresh()
-
-
-def _modal_frame(win, title: str, lines_h: int, box_w: int) -> Tuple[int, int, int]:
-    """Draw a centered, cleared box; returns its (y, x, inner width)."""
-    height, width = win.getmaxyx()
-    box_w = min(box_w, width - 2)
-    box_h = min(lines_h + 4, height - 1)
-    y, x = max(0, (height - box_h) // 2), max(0, (width - box_w) // 2)
-    for row in range(box_h):
-        _put(win, y + row, x, " " * box_w)
-    _box(win, y, x, box_h, box_w, title, _color(_FOCUS_PAIR) | curses.A_BOLD)
-    return y, x, box_w - 4
-
-
-def _wait_key(win) -> int:
-    while True:
-        ch = win.getch()
-        if ch != curses.KEY_RESIZE:
-            return ch
 
 
 def show_summary(win, floor: Floor) -> None:
     rows = floor.summary_lines()
-    draw(win, floor)
-    y, x, inner = _modal_frame(win, "ACCOUNT SUMMARY", len(rows) + 2, 50)
-    for i, (label, value) in enumerate(rows):
-        attr = curses.A_BOLD if label == "Balance" else (curses.A_DIM if label.startswith("Balance =") else 0)
-        _put(win, y + 2 + i, x + 2, f"{label:<{inner - 16}}{value:>16}" if value else label, attr)
-    _put(win, y + 2 + len(rows) + 1, x + 2, "Press any key to return", curses.A_DIM)
-    win.refresh()
-    _wait_key(win)
+
+    def redraw() -> None:
+        draw(win, floor)
+        y, x, inner = tui.modal_frame(win, "ACCOUNT SUMMARY", len(rows) + 2, 50)
+        for i, (label, value) in enumerate(rows):
+            attr = curses.A_BOLD if label == "Balance" else (curses.A_DIM if label.startswith("Balance =") else 0)
+            tui.put(win, y + 2 + i, x + 2, f"{label:<{inner - 16}}{value:>16}" if value else label, attr)
+        tui.put(win, y + 2 + len(rows) + 1, x + 2, "Press any key to return", curses.A_DIM)
+        floor.marquee.draw(win)
+        win.refresh()
+
+    redraw()
+    tui.wait_key(win, floor.marquee, redraw)
 
 
 def show_transactions(win, floor: Floor) -> None:
@@ -625,63 +560,61 @@ def show_transactions(win, floor: Floor) -> None:
     while True:
         draw(win, floor)
         height, _ = win.getmaxyx()
-        rows = max(1, min(len(lines) or 1, height - 9))
+        rows = max(1, min(len(lines) or 1, height - 12))
         view.resize(rows)
-        y, x, inner = _modal_frame(win, "TRANSACTIONS", rows + 3, 100)
-        _put(win, y + 2, x + 2, header[:inner], curses.A_BOLD)
+        y, x, inner = tui.modal_frame(win, "TRANSACTIONS", rows + 3, 100)
+        tui.put(win, y + 2, x + 2, header[:inner], curses.A_BOLD)
         if not lines:
-            _put(win, y + 3, x + 2, "No deposits or withdrawals yet.")
+            tui.put(win, y + 3, x + 2, "No deposits or withdrawals yet.")
         for row, index in enumerate(view.visible):
             lit = index == view.cursor
-            _put(win, y + 3 + row, x + 2, lines[index][:inner].ljust(inner), curses.A_REVERSE if lit else 0)
+            tui.put(win, y + 3 + row, x + 2, lines[index][:inner].ljust(inner), curses.A_REVERSE if lit else 0)
         more = ("▲ " if view.more_above else "  ") + ("▼" if view.more_below else " ")
-        _put(win, y + 3 + rows + 1, x + 2, f"{more}  Up/Down/PgUp/PgDn scroll   Esc, q or Enter to return", curses.A_DIM)
+        tui.put(win, y + 3 + rows + 1, x + 2, f"{more}  Up/Down/PgUp/PgDn scroll   Esc, q or Enter to return", curses.A_DIM)
+        floor.marquee.draw(win)
         win.refresh()
-        ch = _wait_key(win)
-        moves = {curses.KEY_UP: -1, curses.KEY_DOWN: 1, curses.KEY_PPAGE: -rows, curses.KEY_NPAGE: rows,
-                 curses.KEY_HOME: -len(lines), curses.KEY_END: len(lines)}
-        if ch in moves:
-            view.move(moves[ch])
-        elif ch == curses.KEY_MOUSE:
-            try:
-                _, _, _, _, bstate = curses.getmouse()
-            except curses.error:
+        ch = tui.getch(win, floor.marquee)
+        if view.key(ch):
+            continue
+        if ch == curses.KEY_MOUSE:
+            event = tui.mouse()
+            if event is None:
                 continue
-            if bstate & curses.BUTTON4_PRESSED:
-                view.move(-1)
-            elif bstate & getattr(curses, "BUTTON5_PRESSED", 0):
-                view.move(1)
-            elif bstate & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):
+            if tui.wheel(event[2]):
+                view.move(tui.wheel(event[2]))
+            elif tui.clicked(event[2]):
                 return
-        elif ch in (27, ord("q"), ord("Q"), 10, 13, curses.KEY_ENTER):
+        elif ch in tui.BACK_KEYS + tui.ENTER_KEYS:
             return
 
 
 def prompt_amount(win, floor: Floor, action: str) -> None:
     """Ask for a deposit or withdrawal amount, and make it."""
     title = "DEPOSIT" if action == "deposit" else "WITHDRAW"
-    hint = f"Balance {_money(floor.bank.balance)}"
+    hint = f"Balance {money(floor.bank.balance)}"
     typed, error = "", ""
     curses.curs_set(1)
     try:
         while True:
             draw(win, floor)
-            y, x, inner = _modal_frame(win, title, 5, 50)
-            _put(win, y + 2, x + 2, hint, curses.A_DIM)
-            _put(win, y + 4, x + 2, "Amount: $" + typed, curses.A_BOLD)
-            _put(win, y + 5, x + 2, error[:inner], _color(_BAD_PAIR))
-            _put(win, y + 6, x + 2, "Enter to confirm   Esc to cancel", curses.A_DIM)
+            y, x, inner = tui.modal_frame(win, title, 5, 50)
+            tui.put(win, y + 2, x + 2, hint, curses.A_DIM)
+            tui.put(win, y + 4, x + 2, "Amount: $" + typed, curses.A_BOLD)
+            tui.put(win, y + 5, x + 2, error[:inner], tui.color(tui.BAD))
+            tui.put(win, y + 6, x + 2, "Enter to confirm   Esc to cancel", curses.A_DIM)
+            floor.marquee.draw(win)
+            caret = (y + 4, x + 11 + len(typed))
             try:
-                win.move(y + 4, x + 11 + len(typed))
+                win.move(*caret)
             except curses.error:
                 pass
             win.refresh()
-            ch = _wait_key(win)
+            ch = tui.getch(win, floor.marquee, caret)
             if ch == 27:
                 return
             if ch in (curses.KEY_BACKSPACE, 127, 8):
                 typed = typed[:-1]
-            elif ch in (10, 13, curses.KEY_ENTER):
+            elif ch in tui.ENTER_KEYS:
                 amount = parse_amount(typed)
                 if amount is None:
                     error = "That isn't an amount."
@@ -697,6 +630,19 @@ def prompt_amount(win, floor: Floor, action: str) -> None:
         curses.curs_set(0)
 
 
+def open_data(win, floor: Floor, action: str) -> None:
+    """DATA: choose a game, then show its sessions or its P/L chart."""
+    which = "HISTORICAL SESSION DATA" if action == "data:sessions" else "P/L CHARTS"
+    backdrop = lambda: draw(win, floor)  # noqa: E731
+    game = data_views.pick_game(win, floor, which, backdrop)
+    if game is None:
+        return
+    if action == "data:sessions":
+        data_views.show_sessions(win, floor, game, backdrop)
+    else:
+        data_views.show_chart(win, floor, game, backdrop)
+
+
 # --------------------------------------------------------------------------
 # Running it
 # --------------------------------------------------------------------------
@@ -706,11 +652,7 @@ def _floor_main(win, floor: Floor) -> Optional[Game]:
     """One visit to the floor; returns the game picked, or None to leave."""
     curses.curs_set(0)
     win.keypad(True)
-    # Wait for each key. Curses hands back the same window every visit, so a
-    # game's own settings (blackjack polls every 100 ms to animate) would
-    # otherwise still be in force here.
-    win.timeout(-1)
-    _init_colors()
+    tui.init_colors()
     escdelay = curses.get_escdelay() if hasattr(curses, "get_escdelay") else None
     if escdelay is not None:
         curses.set_escdelay(25)  # Esc clears the highlight -- don't make it wait a second
@@ -723,18 +665,18 @@ def _floor_main(win, floor: Floor) -> Optional[Game]:
     try:
         while True:
             draw(win, floor)
-            ch = win.getch()
+            # (getch sets its own wait each time, so a game's own settings --
+            # blackjack polls every 100 ms to animate -- never carry over)
+            ch = tui.getch(win, floor.marquee)
             action = None
             if ch == curses.KEY_MOUSE:
-                try:
-                    _, mx, my, _, bstate = curses.getmouse()
-                except curses.error:
+                event = tui.mouse()
+                if event is None:
                     continue
-                if bstate & curses.BUTTON4_PRESSED:
-                    floor.wheel(my, mx, -1)
-                elif bstate & getattr(curses, "BUTTON5_PRESSED", 0):
-                    floor.wheel(my, mx, 1)
-                elif bstate & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):
+                my, mx, bstate = event
+                if tui.wheel(bstate):
+                    floor.wheel(my, mx, tui.wheel(bstate))
+                elif tui.clicked(bstate):
                     action = floor.click(my, mx)
             else:
                 action = floor.key(ch)
@@ -751,6 +693,8 @@ def _floor_main(win, floor: Floor) -> Optional[Game]:
                 show_transactions(win, floor)
             elif action in ("deposit", "withdraw"):
                 prompt_amount(win, floor, action)
+            elif action.startswith("data:"):
+                open_data(win, floor, action)
     finally:
         if escdelay is not None:
             curses.set_escdelay(escdelay)  # a game launched next gets the terminal exactly as it would on its own

@@ -7,12 +7,15 @@ and what blackjack won, and is never lost if the bank can't be created; blackjac
 deposits/withdrawals and its table results as winnings. The floor: where everything goes (the sign, the
 banner, the menus' inch margins, the clear bottom 15%, the notice on the last line), menus stop at their ends and
 scroll, focus moves between them, clicking off clears the highlight, the bank options move money within the
-limits, and a game's 'exit' comes back to the floor while 'quit' closes the casino."""
+limits, and a game's 'exit' comes back to the floor while 'quit' closes the casino. The marquee: lights every third
+outer cell, alternating green and red with no seam, moving one cell clockwise a step. DATA: blackjack's sessions and
+round-by-round P/L read back exactly (and read-only), and the line chart drawn from them."""
 import importlib
 import io
 import json
 import math
 import os
+import sqlite3
 import random
 from pathlib import Path
 
@@ -201,6 +204,9 @@ v.home()
 check(v.cursor == 0 and v.top == 0 and v.more_below, "Home goes back to the top")
 
 check(floor_m.GAMES[0].name == "Classic Blackjack" and floor_m.GAMES[0].bank_key == "blackjack", "the Games menu lists Classic Blackjack")
+check([m.title for m in floor_m.Floor().menus] == ["GAMES", "BANK", "DATA"]
+      and [i.label for i in floor_m.DATA_ITEMS] == ["Historical Session Data", "P/L Charts"],
+      "three menus: GAMES, BANK, and DATA with Historical Session Data and P/L Charts")
 inch = floor_m.COLUMNS_PER_INCH
 games = [floor_m.Game(f"Game {i}", f"g{i}", lambda: None) for i in range(40)]
 S.reset_data()
@@ -208,41 +214,71 @@ f = floor_m.Floor(games=games)
 f.open_bank()
 H, W = 60, 238                                                         # about a maximized window on a 13-inch MacBook Pro
 lay = f.layout(H, W)
-(by, left_x), (_, right_x) = lay.boxes
-check(lay.fits and lay.sign_y == 1 and len(lay.sign) == 8 and max(len(r) for r in lay.sign) == 220 and (W - 220) // 2 >= floor_m.SIGN_MARGIN,
-      "the sign: a blank row from the top, then one line at 1.5x the original size (letters 2 columns apart, 9 columns clear each side)")
+(gy, gx, gh, gw), (by, bx, bh, bw), (dy, dx, dh, dw) = lay.rects
+check(lay.fits and lay.sign_y == 2 and len(lay.sign) == 8 and max(len(r) for r in lay.sign) == 220 and (W - 220) // 2 >= floor_m.SIGN_MARGIN,
+      "the sign: the marquee row, a blank row, then one line at 1.5x the original size (letters 2 columns apart, room each side)")
 check(lay.banner_y == lay.sign_y + len(lay.sign) + 1 and lay.banner_x == 3 * inch and lay.banner_x + lay.banner_w == W - 3 * inch,
       f"a blank row, then the banner, 3 inches ({3 * inch} columns) clear on either side")
-check(by == lay.banner_y + 2 and left_x == inch and right_x + lay.box_w == W - inch and right_x - (left_x + lay.box_w) in (4, 5),
-      f"a blank row, then the menus: 1 inch ({inch} columns) in from each side, the usual gap between them")
-check(by + lay.box_h == H - math.ceil(H * 0.15) and lay.status_y == by + lay.box_h,
-      "the menus end where the bottom 15% of the screen begins, the balance just below them")
-check(lay.notice == [floor_m.NOTICE] and lay.notice_y == H - 1 and lay.footer_y == H - 2, "the notice is the bottom line, the keys just above it")
+check(floor_m.BANNER_TEXT == "Luxury Gaming & Amenities | Making Your Dreams Come True One Bet At A Time", "...reading as it should")
+check(gy == by == lay.banner_y + 2 and gx == inch and bx + bw == W - inch and bx - (gx + gw) in (4, 5) and dx == bx and dw == bw == gw,
+      f"a blank row, then the menus: 1 inch ({inch} columns) in from each side, the usual gap between the two sides")
+check(bh == len(floor_m.BANK_ITEMS) + 2 and dy == by + bh + 1, "BANK ends right after Transactions, DATA starts a row below it")
+check(gy + gh == dy + dh == H - math.ceil(H * 0.15) and lay.status_y == gy + gh,
+      "GAMES and DATA both end where the bottom 15% of the screen begins, the balance just below")
+check(lay.notice == [floor_m.NOTICE] and lay.notice_y == H - 2 and lay.footer_y == H - 3,
+      "the notice sits on the row above the marquee, the keys just above it")
 narrow = floor_m.Floor().layout(24, 80)
-check(narrow.fits and len(narrow.notice) > 1 and narrow.notice_y + len(narrow.notice) == 24 and " ".join(narrow.notice) == floor_m.NOTICE,
-      "in a narrow window the notice wraps, whole, still ending on the bottom line")
+check(narrow.fits and len(narrow.notice) > 1 and narrow.notice_y + len(narrow.notice) == 23 and " ".join(narrow.notice) == floor_m.NOTICE
+      and all(len(line) + 2 <= 80 - 4 for line in narrow.notice),
+      "in a narrow window the notice wraps, whole, its strip clear of the marquee, still ending just above it")
+inside = all(1 <= y and y + h <= H - 1 and 1 <= x and x + w <= W - 1 for y, x, h, w in lay.rects)
+check(inside and lay.sign_y >= 1 and lay.notice_y + len(lay.notice) <= H - 1 and lay.banner_x >= 1,
+      "nothing on the floor touches the outermost rows and columns -- they're the marquee's")
+
 rows = f.menus[0].view.rows
 for _ in range(39):
     f.key(curses.KEY_DOWN)
 check(f.menus[0].cursor == 39 and f.menus[0].view.top == 40 - rows and f.menus[0].view.more_above,
       f"a menu longer than its box ({rows} rows) scrolls (viewport) as the highlight moves")
+check(f.key(curses.KEY_DOWN) is None and f.focus == 0 and f.menus[0].cursor == 39, "Down on GAMES' last option stays there")
 check(f.key(10) == "game:39", "Enter picks the highlighted game")
-check(f.key(curses.KEY_RIGHT) is None and f.focus == 1 and f.key(curses.KEY_RIGHT) is None and f.focus == 1, "Right moves into BANK, and stops at the last menu")
-check(f.key(9) is None and f.focus == 0 and f.key(curses.KEY_BTAB) is None and f.focus == 1, "Tab and Shift-Tab go round the menus")
+check(f.key(curses.KEY_RIGHT) is None and f.focus == 1 and f.key(curses.KEY_RIGHT) is None and f.focus == 1, "Right moves into BANK, and stops on that side")
+for _ in range(3):
+    f.key(curses.KEY_DOWN)
+check(f.menus[1].current.label == "Transactions", "(down to Transactions)")
+f.key(curses.KEY_DOWN)
+check(f.focus == 2 and f.menus[2].cursor == 0, "Down on Transactions carries on into DATA, at its first option")
+f.key(curses.KEY_DOWN)
+check(f.focus == 2 and f.menus[2].current.action == "data:charts" and f.key(10) == "data:charts", "...down to P/L Charts, which Enter picks")
+f.key(curses.KEY_DOWN)
+check(f.focus == 2 and f.menus[2].cursor == 1, "Down on DATA's last option stays there")
+f.key(curses.KEY_UP)
+f.key(curses.KEY_UP)
+check(f.focus == 1 and f.menus[1].current.label == "Transactions", "Up on DATA's first option goes back into BANK, at Transactions")
+f.key(curses.KEY_DOWN)
+f.key(curses.KEY_LEFT)
+check(f.focus == 0, "Left goes to GAMES")
+f.key(curses.KEY_RIGHT)
+check(f.focus == 2, "...and Right back to the right-hand menu last used (DATA)")
+check(f.key(9) is None and f.focus == 0 and f.key(9) is None and f.focus == 1 and f.key(curses.KEY_BTAB) is None and f.focus == 0,
+      "Tab and Shift-Tab go round all three menus")
+f.key(curses.KEY_RIGHT)
+where = (f.focus, f.menus[f.focus].cursor)
 f.key(27)
 check(f.focus is None and f.key(10) is None, "Esc clears the highlight, like clicking off -- and Enter then picks nothing")
 f.key(curses.KEY_DOWN)
-check(f.focus == 1 and f.menus[1].cursor == 0, "the first arrow after that brings the highlight back where it was, without moving it")
+check((f.focus, f.menus[f.focus].cursor) == where, "the first arrow after that brings the highlight back where it was, without moving it")
 check(f.key(ord("q")) == "quit", "q leaves the casino")
 
-(by, bx) = lay.boxes[1]
 deposit_at = (by + 2, bx + 4)
 check(f.click(*deposit_at) is None and f.focus == 1 and f.menus[1].current.action == "deposit", "a click highlights the option under it")
 check(f.click(*deposit_at) == "deposit", "...and a second click on the highlighted option picks it")
+history_at = (dy + 1, dx + 4)
+check(f.click(*history_at) is None and f.focus == 2 and f.click(*history_at) == "data:sessions", "the same in DATA")
 check(f.click(0, 0) is None and f.focus is None, "a click off the menus clears the highlight")
 check(f.click(by, bx + 8) is None and f.focus == 1, "a click on a menu's border moves into that menu")
 check(f.click(lay.status_y, lay.leave_x + 2) == "quit", "a click on 'Leave Casino' leaves")
-f.wheel(lay.boxes[0][0] + 2, lay.boxes[0][1] + 4, 1)
+f.wheel(gy + 2, gx + 4, 1)
 check(f.focus == 0 and f.menus[0].cursor == 39, "the scroll wheel over a menu moves its highlight (stopping at the end)")
 
 check(not floor_m.Floor().layout(10, 50).fits, "a window too small for the menus says so instead of drawing them")
@@ -292,5 +328,104 @@ try:
 finally:
     floor_m.curses.wrapper, floor_m.sys.stdout = real_wrapper, real_stdout
 check(len(played) == 3, "the floor takes back a game left with 'exit', and closes with the casino when it's left with 'quit'")
+
+# =============================================================== J. the marquee
+marquee_m = importlib.import_module("casino.marquee")
+for h, w in ((60, 238), (49, 193), (24, 80), (10, 11)):
+    run = marquee_m.slots(h, w)
+    edge = set(marquee_m.track(h, w))
+    corners = {(0, 0), (0, w - 1), (h - 1, w - 1), (h - 1, 0)}
+    lit = marquee_m.lights(h, w, 0)
+    order = [i for i, cell in enumerate(run) if cell in lit]
+    gaps = {(b - a) % len(run) for a, b in zip(order, order[1:] + order[:1])}
+    colors = [lit[run[i]] for i in order]
+    alternate = all(a != b for a, b in zip(colors, colors[1:] + colors[:1]))
+    check(len(edge) == 2 * (h + w) - 4 and set(run) <= edge and not corners & set(run) and len(run) % 6 == 0,
+          f"{w}x{h}: the lights run round every outer cell but the corners (and a few beside them): {len(run)}, a multiple of six")
+    check(gaps == {3} and alternate and set(colors) == {"green", "red"},
+          f"{w}x{h}: a light every third cell all the way round -- two dark between -- alternating green and red, with no seam")
+h, w = 24, 80
+run = marquee_m.slots(h, w)
+clockwise = {run[i]: run[(i + 1) % len(run)] for i in range(len(run))}
+before, after = marquee_m.lights(h, w, 7), marquee_m.lights(h, w, 8)
+check(after == {clockwise[cell]: color for cell, color in before.items()}, "each step, every light moves one cell clockwise, keeping its color")
+top = lambda step: "".join({"green": "G", "red": "R"}.get(marquee_m.lights(h, w, step).get((0, x)), ".") for x in range(12))
+check(top(1)[1:] == top(0)[:-1] and "G..R..G" in top(0), f"along the top they move left to right: {top(0)} -> {top(1)}")
+right = [marquee_m.lights(h, w, step).get((5, w - 1)) for step in range(6)]
+left = [marquee_m.lights(h, w, step).get((5, 0)) for step in range(6)]
+check(sum(c is not None for c in right) == 2 and sum(c is not None for c in left) == 2, "...and down the right side and up the left, just the same")
+
+# =============================================================== K. the line chart
+charts_m = importlib.import_module("casino.charts")
+c = charts_m.line_chart([0, 10, 20, 30], rows=4, cols=8)
+check(c.cells[-1][0] != charts_m.BLANK and c.cells[0][-1] != charts_m.BLANK and c.cells[0][0] == charts_m.BLANK,
+      "a rising line starts bottom left and ends top right")
+check(c.lo <= 0 <= c.hi and c.zero_row == 3 and [r for r, _ in c.ticks] == sorted(r for r, _ in c.ticks)[::-1] and all(v >= 0 for _, v in c.ticks[1:]),
+      "the range takes in $0, and the labels go up the side in order")
+rng = random.Random(5)
+walk = [0.0]
+for _ in range(2000):
+    walk.append(walk[-1] + rng.choice((-25, 25, 50, -50, 12.5)))
+c = charts_m.line_chart(walk, rows=20, cols=120)
+check(all(any(row[col] != charts_m.BLANK for row in c.cells) for col in range(120)) and len(c.cells) == 20 and all(len(r) == 120 for r in c.cells),
+      "2,000 rounds across 120 columns: the line is unbroken, every column has a dot")
+check(c.lo <= min(walk) and c.hi >= max(walk) and all(c.lo <= v <= c.hi for _, v in c.ticks), "...and stays inside its range, labels included")
+check([charts_m.money_label(v) for v in (20000, -2500, 0, 12.5)] == ["+$20,000", "-$2,500", "$0", "+$12.50"], "axis labels read as money")
+
+# =============================================================== L. blackjack's records, for DATA
+bjrecords = importlib.import_module("blackjack.records")
+data_views = importlib.import_module("casino.data_views")
+S.reset_data()
+check(bjrecords.sessions() == [] and bjrecords.pl_history().rounds == [], "before blackjack has been played: no sessions, no rounds")
+s, hist = launch()
+play(s, 25, seed=31)
+s.reset_session()
+play(s, 12, seed=32)
+open_session = hist.session_id
+db_bytes = history.DB_PATH.read_bytes()
+recs = bjrecords.sessions()
+pl = bjrecords.pl_history()
+check(history.DB_PATH.read_bytes() == db_bytes and hist.conn.execute("select ended_at from sessions where session_id = ?", (open_session,)).fetchone()[0] is None,
+      "reading the records changes nothing -- not even the session still being played")
+rows = {r["session_id"]: r for r in hist.conn.execute("select * from sessions")}
+check([r.number for r in recs] == sorted(rows, reverse=True) and all(rows[r.number]["hands_played"] == r.hands for r in recs),
+      "one record per session, newest first, with its hands")
+total = hist.conn.execute("select sum(total_pl) from hands").fetchone()[0]
+check(abs(sum(r.total_pl for r in recs) - total) < 1e-6 and all(abs(r.main_pl + r.side_pl - r.total_pl) < 1e-9 for r in recs),
+      "their P/L adds up to every hand's")
+first = recs[-1]
+details = dict(first.details)
+low = history.lowest_running_pl(hist.conn, "WHERE session_id = ?", (first.number,))
+check(details["Max drawdown"] == bjrecords.money(low) and "Doubles" in details and "Dealer busts" in details,
+      f"each session's detail has blackjack's own figures, Max drawdown as the stats screen measures it ({details['Max drawdown']})")
+rounds = hist.conn.execute("select count(distinct round_id) from hands").fetchone()[0]
+check(len(pl.rounds) == rounds and abs(pl.rounds[-1][1] - total) < 1e-6 and pl.unrecorded == 0,
+      f"the P/L history: one point per round ({rounds}), ending at the lifetime P/L, nothing unrecorded")
+running = 0.0
+ok = True
+for (_, value), (round_pl,) in zip(pl.rounds, hist.conn.execute("select sum(total_pl) from hands group by round_id order by min(hand_id)")):
+    running += round_pl
+    ok = ok and abs(value - running) < 1e-6
+check(ok, "...each point the running P/L after its round, from $0")
+check(data_views.session_header().split()[0] == "Started" and data_views.session_row(first).count("$") == 4 and
+      f"{len(recs)} sessions" in data_views.session_totals(recs), "the session table's rows and totals")
+detail = dict(data_views.session_detail(first))
+check(detail["Total P/L"] == bjrecords.signed(first.total_pl) and detail["Doubles"] == details["Doubles"], "a session's detail view: the common figures, then blackjack's")
+hist.close(s)
+
+other = Path(HOME) / "other.db"
+s2 = engine.GameSession(10_000.0, rules_m.Rules(), None, None, history=history.HistoryDB.open(other))
+s2.ensure_shoe_ready()
+play(s2, 3, seed=40)
+s2.history.close(s2)
+game = floor_m.blackjack_game(other)
+check(len(game.sessions()) == 1 and len(game.pl_history().rounds) == 3, "a blackjack started with --db FILE shows that file's records")
+old = Path(HOME) / "old.db"
+sqlite3.connect(old).execute("pragma user_version = 2").connection.close()
+try:
+    bjrecords.sessions(old)
+    check(False, "an out-of-date history database is reported")
+except S.casino_records.RecordsError as exc:
+    check("Open Classic Blackjack once" in str(exc), f"an out-of-date history database says how to fix it: {exc}")
 
 check.finish("check_casino")

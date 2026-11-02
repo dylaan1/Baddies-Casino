@@ -429,6 +429,20 @@ def _hand_type(hand: Hand) -> Tuple[str, int]:
     return kind, first.best_value
 
 
+def lowest_running_pl(conn: sqlite3.Connection, where: str = "", params: tuple = ()) -> float:
+    """Max drawdown: the lowest the running P/L (main wagers and side bets,
+    round by round) has ever been over the hands `where` picks, starting from
+    $0 at the first of them -- 0.0 if it never went below. Abandoned hands
+    count: their forfeited wager really left the bankroll."""
+    running = lowest = 0.0
+    for (round_pl,) in conn.execute(
+        f"SELECT SUM(total_pl) FROM hands {where} GROUP BY round_id ORDER BY MIN(hand_id)", params
+    ):
+        running += round_pl
+        lowest = min(lowest, running)
+    return lowest
+
+
 def _readonly_uri(path: Path) -> str:
     return f"{path.resolve().as_uri()}?mode=ro"
 
@@ -1294,19 +1308,6 @@ class HistoryDB:
         c = self.conn
         counts = {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in EXPORT_TABLES}
 
-        def lowest_pl(where: str, params: tuple) -> float:
-            """Max drawdown: the lowest the running P/L (main wagers and side
-            bets, round by round) has ever been, starting from $0 at the first
-            hand counted -- 0.0 if it never went below. Abandoned hands count:
-            their forfeited wager really left the bankroll."""
-            running = lowest = 0.0
-            for (round_pl,) in c.execute(
-                f"SELECT SUM(total_pl) FROM hands {where} GROUP BY round_id ORDER BY MIN(hand_id)", params
-            ):
-                running += round_pl
-                lowest = min(lowest, running)
-            return lowest
-
         def hand_extremes(where: str, params: tuple) -> Dict[str, float]:
             row = c.execute(
                 f"SELECT MAX(main_pl), MIN(main_pl) FROM hands WHERE outcome <> 'abandoned' {where}", params
@@ -1320,13 +1321,13 @@ class HistoryDB:
             session.update(hand_extremes("AND session_id = ?", (self.session_id,)))
             # (the sessions row's own max_drawdown column is the largest
             # peak-to-trough fall; the stats screen shows the lowest point)
-            session["max_drawdown"] = lowest_pl("WHERE session_id = ?", (self.session_id,))
+            session["max_drawdown"] = lowest_running_pl(c, "WHERE session_id = ?", (self.session_id,))
 
         row = c.execute(
             "SELECT MAX(longest_win_streak), MAX(longest_loss_streak), MAX(longest_push_streak) FROM sessions"
         ).fetchone()
         all_time: Dict[str, Any] = {
-            "max_drawdown": lowest_pl("", ()),
+            "max_drawdown": lowest_running_pl(c),
             "longest_win_streak": row[0] or 0,
             "longest_loss_streak": row[1] or 0,
             "longest_push_streak": row[2] or 0,
