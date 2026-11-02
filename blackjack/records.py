@@ -1,15 +1,17 @@
 """Blackjack's history for the casino floor's DATA menu (casino/records.py):
-every session it has logged, and its P/L round by round -- read straight
-from the history database, read-only, so a game open in another terminal
-carries on undisturbed and nothing here can change what's recorded."""
+every session it has logged, its P/L round by round, and its results dealer
+by dealer -- read straight from the history database, read-only, so a game
+open in another terminal carries on undisturbed and nothing here can change
+what's recorded."""
 from __future__ import annotations
 
 import sqlite3
+import textwrap
 from contextlib import closing
 from pathlib import Path
 from typing import List, Optional
 
-from casino.records import PLHistory, RecordsError, SessionRecord, money, signed
+from casino.records import DealerRecord, DealerTable, PLHistory, RecordsError, SessionRecord, money, signed
 
 from . import history
 
@@ -42,12 +44,27 @@ def _connect(db_path: Optional[Path]) -> Optional[sqlite3.Connection]:
     return conn
 
 
+DEALT_BY_WIDTH = 36  # names per line in the session detail before it wraps
+
+
+def _dealt_by(conn: sqlite3.Connection, sid: int) -> list:
+    """("Dealt by", names) -- every dealer who dealt in the session, in the
+    order they first did, wrapped onto more lines when there are many."""
+    names = [r[0] for r in conn.execute(
+        "SELECT dealer_name FROM hands WHERE session_id = ? AND dealer_name IS NOT NULL"
+        " GROUP BY dealer_name ORDER BY MIN(hand_id)", (sid,))]
+    if not names:
+        return [("Dealt by", "not recorded (before the dealers)")]
+    lines = textwrap.wrap(", ".join(names), DEALT_BY_WIDTH, break_long_words=False)
+    return [("Dealt by" if i == 0 else "", line) for i, line in enumerate(lines)]
+
+
 def _details(conn: sqlite3.Connection, row: sqlite3.Row) -> list:
     sid = row["session_id"]
     best, worst = conn.execute(
         "SELECT MAX(main_pl), MIN(main_pl) FROM hands WHERE outcome <> 'abandoned' AND session_id = ?", (sid,)
     ).fetchone()
-    return [
+    return _dealt_by(conn, sid) + [
         ("Surrendered", f"{row['hands_surrendered']}"),
         ("Doubles", f"{row['doubles']}"),
         ("Splits", f"{row['splits']}  (aces {row['aces_split']}, tens {row['tens_split']})"),
@@ -96,6 +113,34 @@ def sessions(db_path: Optional[Path] = None) -> List[SessionRecord]:
             ]
         except sqlite3.Error as exc:
             raise RecordsError(f"Blackjack's history couldn't be read ({exc}).")
+
+
+def dealers(db_path: Optional[Path] = None) -> DealerTable:
+    """Every dealer's results, best total P/L first -- counted the way the
+    sessions are: hands and W-L-P from settled hands, rounds only those that
+    finished, wagers and P/L from every hand -- so a session's dealers add up
+    to the session. Plus the play from before dealers were recorded."""
+    conn = _connect(db_path)
+    if conn is None:
+        return DealerTable()
+    with closing(conn):
+        try:
+            rows = conn.execute(
+                """SELECT dealer_name, COUNT(DISTINCT session_id),
+                          COUNT(DISTINCT round_id) - COUNT(DISTINCT CASE WHEN outcome = 'abandoned' THEN round_id END),
+                          SUM(outcome <> 'abandoned'), SUM(outcome = 'win'), SUM(outcome = 'loss'), SUM(outcome = 'push'),
+                          SUM(final_bet), SUM(main_pl), SUM(sidebet_pl)
+                   FROM hands WHERE dealer_name IS NOT NULL GROUP BY dealer_name"""
+            ).fetchall()
+            unrecorded_hands, unrecorded_pl = conn.execute(
+                "SELECT COALESCE(SUM(outcome <> 'abandoned'), 0), COALESCE(SUM(total_pl), 0) FROM hands WHERE dealer_name IS NULL"
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise RecordsError(f"Blackjack's history couldn't be read ({exc}).")
+    records = [DealerRecord(name, *(int(v) for v in counts), float(wagered), float(main), float(side))
+               for name, *counts, wagered, main, side in (tuple(r) for r in rows)]
+    records.sort(key=lambda d: (-round(d.total_pl, 2), d.name.casefold()))
+    return DealerTable(records, int(unrecorded_hands), float(unrecorded_pl))
 
 
 def pl_history(db_path: Optional[Path] = None) -> PLHistory:

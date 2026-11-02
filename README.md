@@ -75,7 +75,7 @@ edge of the screen, under the **BADDIE'S CASINO** sign, and three menus sit belo
 |---|---|
 | **Games** | Every game in the casino. Pick one to sit down at it. |
 | **Bank** | **Account Summary** (your balance, what each game has won, your deposits and withdrawals), **Deposit**, **Withdraw**, and **Transactions**. |
-| **Data** | **Historical Session Data** and **P/L Charts** for each game (see [Your records](#your-records)). |
+| **Data** | **Historical Session Data**, **P/L Charts**, and **P/L by Dealer** for each game (see [Your records](#your-records)). |
 
 Move with the arrow keys (←/→ or Tab to switch menus), pick with Enter, or click an option and click it again.
 `q` leaves the casino.
@@ -99,9 +99,12 @@ starts with a $10,000.00 opening deposit.
 Every game logs its play, and the floor's **Data** menu reads it back without changing anything:
 
 - **Historical Session Data**: the game's lifetime totals, then a table of every session (newest first) with
-  its length, hands, W-L-P, amount wagered, P/L, and EV. Open a session for its full detail.
+  its length, hands, W-L-P, amount wagered, P/L, and EV. Open a session for its full detail, including who
+  dealt it.
 - **P/L Charts**: a line chart of the game's running profit and loss, round by round from $0, with its
   current, highest, and lowest points.
+- **P/L by Dealer**: how you've done against each dealer, best first: sessions, rounds, hands, W-L-P,
+  wagered, P/L, and EV.
 
 ### Coming and going
 

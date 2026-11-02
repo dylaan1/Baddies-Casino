@@ -118,7 +118,7 @@ conn.execute("""INSERT INTO hands (round_id, session_id, played_at, spot_number,
 conn.commit()
 conn.close()
 h = history.HistoryDB.open(v2)
-check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == history.SCHEMA_VERSION == 4, "a v2 database upgrades to v4 on open")
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == history.SCHEMA_VERSION == 5, "a v2 database upgrades to v5 on open")
 check("reshuffled_mid_round" in [r[1] for r in h.conn.execute("pragma table_info(hands)")], "the hands table gained reshuffled_mid_round")
 check(h.conn.execute("select reshuffled_mid_round from hands").fetchone()[0] == 0, "existing rows read 0 (no reshuffle) -- the truth for everything logged before this feature")
 h.conn.close()
@@ -134,7 +134,7 @@ conn.execute("""INSERT INTO shoes (session_id, cut_at, cut_reason, num_decks, pe
 conn.commit()
 conn.close()
 h = history.HistoryDB.open(v1)
-check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 4, "a v1 database upgrades all the way to v4")
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 5, "a v1 database upgrades all the way to v5")
 mig = h.conn.execute("select card_order from shoes").fetchone()[0]
 check(mig == full[:20] + "|" + full[20:], "its card_order gets the '|' put in at cards_dealt (10 cards dealt)")
 check(h.conn.execute("select count(*) from imported_stats").fetchone()[0] == 0, "imported_stats exists (empty)")
@@ -175,7 +175,7 @@ conn.row_factory = sqlite3.Row
 before = [dict(r) for r in conn.execute("select * from sessions order by session_id")]
 conn.close()
 h = history.HistoryDB.open(v3)
-check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 4, "a v3 database upgrades to v4")
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 5, "a v3 database upgrades to v5")
 cols = [r[1] for r in h.conn.execute("pragma table_info(sessions)")]
 check("dealer_21s" in cols and "dealer_pulled_21s" not in cols and "longest_push_streak" in cols,
       "sessions: dealer_pulled_21s renamed to dealer_21s, longest_push_streak added")
@@ -208,6 +208,93 @@ m = h._session_metrics(1)
 check((m["current_streak_kind"], m["current_streak"]) == ("W", 1), f"session 1 ends on W1: {(m['current_streak_kind'], m['current_streak'])}")
 m = h._session_metrics(2)
 check((m["current_streak_kind"], m["current_streak"]) == ("L", 1), "session 2 ends on L1 (the push before it ended the first L)")
+h.conn.close()
+
+# =============================================================== the dealer, shoe by shoe and hand by hand
+S.reset_data()
+s, hist = new_session(decks=6)
+
+
+def deal_one(s, hist):
+    """One round, every hand stood (so one hand row), logged."""
+    r, err = engine.try_start_round(s)
+    assert err is None, err
+    S.finish_round(r)
+    hist.record_round(s, r)
+
+
+opener = s.dealer
+deal_one(s, hist)
+for _ in range(5):
+    s.reset_shoe()
+deal_one(s, hist)                                # still the 6th shoe: the same dealer
+second = s.dealer
+s.reset_shoe()                                   # the 7th: a new one
+deal_one(s, hist)
+third = s.dealer
+commands.handle_command(f"fire {third}", s)      # let go part-way through the 7th shoe...
+deal_one(s, hist)
+relief = s.dealer
+hist.close(s)
+c = sqlite3.connect(history.DB_PATH)
+shoes = [row for row in c.execute("select dealer_name from shoes order by shoe_id")]
+check([d for (d,) in shoes] == [opener] * 6 + [third] and opener == second and third != opener,
+      f"every shoe records the dealer who opened it: six for {opener}, then {third} ({[d for (d,) in shoes]})")
+hands = [row for row in c.execute("select h.dealer_name, s.dealer_name from hands h join shoes s using (shoe_id) order by hand_id")]
+check(len(hands) == 4 and [h for h, _ in hands] == [opener, opener, third, relief] and relief not in (third, None)
+      and [sh for _, sh in hands] == [opener, opener, third, third],
+      f"...and every hand the dealer who dealt it -- after {third} was let go mid-shoe, {relief}, on {third}'s shoe")
+c.close()
+
+# v4 -> v5: the columns arrive, and shoes cut since the dealers arrived get theirs back from rules_json
+v4 = Path(HOME) / "v4.db"
+conn = sqlite3.connect(v4)
+conn.executescript(history._SCHEMA_V1 + history._SCHEMA_V2 + history._SCHEMA_V3 + history._SCHEMA_V4 + "\nPRAGMA user_version = 4;")
+conn.execute("INSERT INTO sessions (started_at, starting_bankroll, ending_bankroll, peak_bankroll, lowest_bankroll) VALUES ('2026-11-02T00:00:00Z',1,1,1,1)")
+for rules_json in ('{}', '{"num_decks": 6, "recent_dealers": ["Matt", "Kayla"]}', '{"recent_dealers": []}', '{"recent_dealers": "Kayla"}', '{not json, recent_dealers'):
+    conn.execute("""INSERT INTO shoes (session_id, cut_at, cut_reason, num_decks, penetration, total_cards, cards_dealt, blackjack_payout,
+                    hit_soft_17, rules_json, card_order) VALUES (1, '2026-11-02T00:00:00Z', 'start', 6, 0.75, 312, 0, 1.5, 0, ?, '')""", (rules_json,))
+for shoe_id in (1, 2, 2):
+    conn.execute("""INSERT INTO hands (round_id, session_id, shoe_id, played_at, spot_number, hand_number, initial_bet, final_bet, hand_type,
+         initial_total, player_cards, player_total, player_soft, player_bust, player_blackjack, is_split, is_split_aces, doubled,
+         surrendered, even_money, dealer_up, dealer_cards, dealer_total, dealer_bust, dealer_blackjack, outcome, payout, main_pl,
+         total_pl, running_count_before, true_count_before, cards_dealt_before, bankroll_before, bankroll_after)
+         VALUES (1,1,?,'2026-11-02T00:00:00Z',1,1,10,10,'hard',12,'5♠7♥',12,0,0,0,0,0,0,0,0,'T♦','T♦6♣',16,0,0,'loss',0,-10,-10,0,0,0,100,90)""",
+                 (shoe_id,))
+conn.commit()
+conn.close()
+h = history.HistoryDB.open(v4)
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 5
+      and "dealer_name" in [r[1] for r in h.conn.execute("pragma table_info(shoes)")]
+      and "dealer_name" in [r[1] for r in h.conn.execute("pragma table_info(hands)")],
+      "a v4 database upgrades to v5: shoes and hands gain dealer_name")
+check([r[0] for r in h.conn.execute("select dealer_name from shoes order by shoe_id")] == [None, "Kayla", None, None, None],
+      "a shoe cut since the dealers arrived gets its dealer back (the last of the rotation in its rules); anything else stays unknown")
+check([r[0] for r in h.conn.execute("select dealer_name from hands order by hand_id")] == [None, "Kayla", "Kayla"],
+      "...and so do the hands dealt from it")
+h.conn.close()
+
+v4b = Path(HOME) / "v4b.db"
+conn = sqlite3.connect(v4b)
+conn.executescript(history._SCHEMA_V1 + history._SCHEMA_V2 + history._SCHEMA_V3 + history._SCHEMA_V4 + "\nPRAGMA user_version = 4;")
+conn.close()
+
+
+def failing_backfill(conn):
+    raise sqlite3.OperationalError("disk I/O error")
+
+
+saved_follow_up = history._MIGRATION_FOLLOW_UPS[5]
+history._MIGRATION_FOLLOW_UPS[5] = failing_backfill
+h = history.HistoryDB.open(v4b)
+history._MIGRATION_FOLLOW_UPS[5] = saved_follow_up
+conn = sqlite3.connect(v4b)
+check(h.error is not None and conn.execute("pragma user_version").fetchone()[0] == 4
+      and "dealer_name" not in [r[1] for r in conn.execute("pragma table_info(shoes)")],
+      f"an upgrade that fails part-way leaves the database exactly at v4, columns and all ({h.error})")
+conn.close()
+h = history.HistoryDB.open(v4b)
+check(h.error is None and h.conn.execute("pragma user_version").fetchone()[0] == 5, "...and the next launch upgrades it")
 h.conn.close()
 
 check.finish("check_history_reshuffle")

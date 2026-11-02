@@ -350,7 +350,37 @@ UPDATE sessions SET
 DROP TABLE streak_runs;
 """
 
-_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4]
+# v5: the dealer (see blackjack/dealers.py). shoes.dealer_name is the dealer
+# who opened the shoe; hands.dealer_name the one who dealt the round -- the
+# same, unless the dealer on duty was let go part-way through a shoe ('fire'),
+# when the next one deals the rest of it. Rows logged before the dealers
+# arrived read NULL, except shoes cut since, which get theirs back from
+# rules_json (see _backfill_dealer_names), and the hands dealt from them.
+_SCHEMA_V5 = """
+ALTER TABLE shoes ADD COLUMN dealer_name TEXT;
+ALTER TABLE hands ADD COLUMN dealer_name TEXT;
+"""
+
+
+def _backfill_dealer_names(conn: sqlite3.Connection) -> None:
+    """Part of the v5 step: a shoe cut since the dealers arrived has the
+    rotation in its rules_json (Rules.recent_dealers), and the last name in
+    it is the dealer who opened the shoe. Done here rather than in SQL so it
+    doesn't depend on SQLite's JSON functions being built in."""
+    rows = conn.execute("SELECT shoe_id, rules_json FROM shoes WHERE rules_json LIKE '%recent_dealers%'").fetchall()
+    for shoe_id, rules_json in rows:
+        try:
+            recent = json.loads(rules_json).get("recent_dealers")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(recent, list) and recent and isinstance(recent[-1], str):
+            conn.execute("UPDATE shoes SET dealer_name = ? WHERE shoe_id = ?", (recent[-1], shoe_id))
+            conn.execute("UPDATE hands SET dealer_name = ? WHERE shoe_id = ?", (recent[-1], shoe_id))
+
+
+_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5]
+# Python run inside a step's transaction, after its SQL: target version -> function.
+_MIGRATION_FOLLOW_UPS = {5: _backfill_dealer_names}
 SCHEMA_VERSION = len(_MIGRATIONS)
 
 
@@ -372,7 +402,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for target in range(version, SCHEMA_VERSION):
             # One transaction per step, version bump included, so a crash mid-
             # migration leaves the database exactly at the previous version.
-            conn.executescript(f"BEGIN;\n{_MIGRATIONS[target]}\nPRAGMA user_version = {target + 1};\nCOMMIT;")
+            follow_up = _MIGRATION_FOLLOW_UPS.get(target + 1)
+            if follow_up is None:
+                conn.executescript(f"BEGIN;\n{_MIGRATIONS[target]}\nPRAGMA user_version = {target + 1};\nCOMMIT;")
+                continue
+            try:
+                conn.executescript(f"BEGIN;\n{_MIGRATIONS[target]}")  # (the transaction stays open...)
+                follow_up(conn)
+                conn.execute(f"PRAGMA user_version = {target + 1}")
+                conn.commit()  # (...to here)
+            except BaseException:
+                conn.rollback()
+                raise
     finally:
         conn.execute(f"PRAGMA foreign_keys = {'ON' if enforced else 'OFF'}")
 
@@ -780,6 +821,7 @@ class HistoryDB:
             "blackjack_payout": session.active_rules.blackjack_payout,
             "hit_soft_17": int(session.active_rules.hit_soft_17),
             "rules_json": json.dumps(session.rules.to_dict(), sort_keys=True),
+            "dealer_name": session.dealer,
             # The shuffle exists only in memory for now: cards are
             # written as they're dealt, the rest when the shoe retires.
             "card_order": "",
@@ -1150,6 +1192,7 @@ class HistoryDB:
             "shoe_id": round_.history_shoe_id if round_.history_shoe_id is not None else self.shoe_id,
             "reshuffled_mid_round": int(round_.reshuffled_mid_round),
             "played_at": _now(),
+            "dealer_name": session.dealer,
             "dealer_up": round_.dealer_up.token,
             "dealer_cards": cards_to_string(dealer.cards),
             "dealer_total": dealer.best_value,

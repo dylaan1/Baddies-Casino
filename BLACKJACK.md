@@ -54,14 +54,16 @@ the bottom 15% of the screen begins:
   Summary** (your balance, what each game has won, and your total deposits and
   withdrawals), **Deposit**, **Withdraw** (up to your balance), and
   **Transactions** (every deposit and withdrawal, newest first).
-- **Data** (below Bank) — **Historical Session Data** and **P/L Charts**. Each
+- **Data** (below Bank) — **Historical Session Data**, **P/L Charts**, and
+  **P/L by Dealer**. Each
   first asks which game (a short list, which scrolls once there are more
   games than fit), then opens a window over the floor:
   - **Historical Session Data**: the game's lifetime totals (sessions, hands,
     rounds, wagered, total P/L, EV), then a table of every session that had a
     hand in it, newest first — start, length, rounds, hands, W-L-P, wagered,
     main P/L, side-bet P/L, total P/L, EV. Enter (or a second click) on a
-    session opens its full detail; for blackjack that adds surrenders,
+    session opens its full detail; for blackjack that adds who dealt it (in
+    the order they took the table), surrenders,
     doubles, splits, blackjacks, dealer 21s and busts, the longest streaks,
     shoes played, the session's max drawdown, its biggest hand win and loss,
     and how it ended.
@@ -73,6 +75,12 @@ the bottom 15% of the screen begins:
     an older version counted only as lifetime totals can't be charted round
     by round, so it's noted underneath instead (for blackjack, the imported
     pre-database P/L).
+  - **P/L by Dealer**: for a game with dealers, a table of every dealer's
+    results, best total P/L first — the sessions they dealt in, rounds,
+    hands, W-L-P, wagered, main P/L, side-bet P/L, total P/L, EV — counted
+    the way the sessions are, so a session's dealers add up to the session.
+    Play from before dealers were recorded is left out, and noted under the
+    table with its hands and P/L.
 
   These read each game's own history read-only, so they never change what's
   recorded, and a game open in another terminal carries on undisturbed.
@@ -614,7 +622,10 @@ adds a sound beyond the ordinary card-deal ones.
   dealer on duty brings the next one in at once (between rounds only).
   `dealers` lists the roster, who's dealing, and who's sitting out; the
   `gamerules` screen shows the same. The roster and the last two dealers are
-  saved with your table rules.
+  saved with your table rules, and the history database records who dealt
+  every shoe and every hand (`dealer_name` — see **Data storage**): the
+  floor's **Data** menu shows it as **P/L by Dealer**, and as who dealt each
+  session in its detail.
 
 **Shoe/session management**
 
@@ -949,15 +960,15 @@ CSBJ_FULL=1 python3 -m unittest discover -s tests   # also the mutation check an
 |---|---|
 | `check_failsafe.py` | The mid-round reshuffle: every draw path (deal, hit, double, both split draws, the dealer), the cards on the table stay put, the count and card accounting stay exact, and the prevention limits and their messages |
 | `check_split_cap.py` | One split per hand on a single deck, and only there |
-| `check_history_reshuffle.py` | How the log records a round that ran the shoe dry (start shoe, the `reshuffled_mid_round` flag, the exact cards of both shoes), and upgrades of older database versions |
+| `check_history_reshuffle.py` | How the log records a round that ran the shoe dry (start shoe, the `reshuffled_mid_round` flag, the exact cards of both shoes), the dealer of every shoe and hand (one let go mid-shoe included), and upgrades of older database versions (the dealers filled in where the saved rules show them; an upgrade that fails part-way leaving the database as it was) |
 | `check_stats_and_import.py` | Every lifetime and session figure comes from the database; the one-time import of an older game's stats (including negative figures); `newsession`, `bank reset`, and `--db` |
 | `check_launchers.py` | The shell aliases: the launchers from another folder (a same-named module there isn't picked up instead), and the installer (added once, updated in place, backed up, written through a symlink, the rest of the file untouched, the aliases working in zsh) |
 | `check_table.py` | The table's look apart from the screen: the rules on the felt follow the rules in play (a change waits for the next shoe), the red bar's limits (as one range, bet by bet, shortened when tight), chip colors by wager, the shoe/tray gauge (the cut card coming up toward the front), the shoe count the card backs alternate on, the dealer rotation (every session and six shoes, none twice in three, carried across sessions), `hire`/`fire`, and the peek's size |
-| `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, blackjack's bank commands and results landing in the right column, the floor's layout, menus (Bank flowing into Data), focus, clicks, and bank options, the marquee (a light every third outer cell at every window size, alternating with no seam, moving clockwise), the line chart, and blackjack's records read back exactly and read-only |
+| `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, blackjack's bank commands and results landing in the right column, the floor's layout, menus (Bank flowing into Data), focus, clicks, and bank options, the marquee (a light every third outer cell at every window size, alternating with no seam, moving clockwise), the line chart, and blackjack's records read back exactly and read-only (each session's dealers, and P/L by Dealer adding up to the sessions) |
 | `check_data_safety.py` | `export`, `backup`, `restore` (and rejecting bad backups), crash recovery, corrupt or newer files, atomic saves, and playing on with no database |
 | `check_locked_db.py` | Another program holding the database: nothing is dropped or mis-attributed, and it all lands, in order, once the lock lifts |
 | `check_audit.py` | Thousands of random rounds with the log attached, checked against ground truth: bankroll conservation, the casino bank getting exactly the table's P/L, the exact cards dealt, every stat against an independent implementation, the running counts |
-| `check_ui.py` | The real screen in a pseudo-terminal: the table's gold rail and dividers, the header bars, felt and its `▓` margins, crease, the dealer's peek, name and total, rules line, the main wager's rectangle and `▼`, the NEW DEALER flash, shaded betting spots and chips, shoe and tray, the brighter felt under the spot being played, and cards (white faces squared off half a cell in, the shadow round them and between fanned cards, the back alternating blue/red by shoe), the idle Power Poker spot's muted magenta, the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, the casino floor by keyboard and mouse (its colors and margins, the marquee lit and chasing clockwise, blackjack launched from it, the bank options, both Data windows), both games started from another folder through the aliases' launchers, and the smallest window the table fits in (the size it asks for, exactly). Needs `pip install pyte`; skipped without it |
+| `check_ui.py` | The real screen in a pseudo-terminal: the table's gold rail and dividers, the header bars, felt and its `▓` margins, crease, the dealer's peek, name and total, rules line, the main wager's rectangle and `▼`, the NEW DEALER flash, shaded betting spots and chips, shoe and tray, the brighter felt under the spot being played, and cards (white faces squared off half a cell in, the shadow round them and between fanned cards, the back alternating blue/red by shoe), the idle Power Poker spot's muted magenta, the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, the casino floor by keyboard and mouse (its colors and margins, the marquee lit and chasing clockwise, blackjack launched from it, the bank options, all three Data windows), both games started from another folder through the aliases' launchers, and the smallest window the table fits in (the size it asks for, exactly). Needs `pip install pyte`; skipped without it |
 | `tools/mutation_check.py` | Injects known bugs and confirms the checks above fail for each — a check that can't fail proves nothing |
 | `tools/consumption.py`, `tools/montecarlo.py`, `tools/adversary.py` | The measurements behind the minimum-cards floors: cards used per round, crash / failsafe rates per configuration over millions of rounds, and a search over every legal line of play (run them directly; `--help`-style usage is in each file's docstring) |
 
@@ -1066,6 +1077,7 @@ launches. The row is updated after every round, so it's always current.
 | `cut_at`, `retired_at`, `cut_reason` | `cut_reason`: `start`, `penetration` (cut card or minimum-cards rule reached), `newshoe`, `newsession`, `mid_round` (the shoe ran out during a round and the discards were reshuffled), `restore` (older databases may also contain `hardreset`) |
 | `num_decks`, `penetration`, `total_cards`, `cards_dealt` | Deck count; the depth the shoe is really cut at (with `deckpen rand`, the value that was rolled; a two-deck shoe is at most 0.80; a single deck is cut by card count, so at most 28/52 ≈ 0.54); cards actually dealt from it |
 | `blackjack_payout`, `hit_soft_17`, `rules_json` | Table rules as of the cut, including every side-bet payout |
+| `dealer_name` | The dealer who opened the shoe (see **Dealers**). `NULL` for shoes logged before the dealers arrived; shoes cut since then but logged before schema v5 had it filled in from `rules_json` when the database was upgraded |
 | `card_order` | **The exact order of the whole shuffle, first card dealt first**, with the never-dealt cards marked off after a `\|` — e.g. `K♣T♦3♠\|7♥A♠…` reads *dealt* `\|` *never dealt* (624 characters plus the `\|` for six decks) |
 
 **How `card_order` gets written.** The shuffle exists only in the game's
@@ -1101,6 +1113,7 @@ columns repeat on every hand of a round).
 | `player_cards`, `player_total`, `player_soft`, `player_bust`, `player_blackjack` | The final hand |
 | `is_split`, `is_split_aces`, `doubled`, `surrendered`, `even_money` | How it was played |
 | `dealer_up`, `dealer_cards`, `dealer_total`, `dealer_bust`, `dealer_blackjack` | The dealer's hand |
+| `dealer_name` | The dealer who dealt the round: the shoe's own dealer, unless the one on duty was let go (`fire`) part-way through the shoe and the next one dealt the rest. `NULL` for hands from before the dealers arrived |
 | `outcome` | `win`, `loss`, `push`, `surrender`, or `abandoned` (a hand still unsettled when the game was quit; its wager is forfeited, as it is in your saved bankroll) |
 | `payout`, `main_pl` | Total returned for the hand, and `payout − final_bet` |
 | `insurance_*`, `power_poker_*`, `star21_*`, `dealer_buster_*` | `_wager`, `_pl`, and (for the three side bets) `_category` — which payout category the cards made, recorded whether or not you wagered on it, which is what you want for judging a payout |
@@ -1131,6 +1144,15 @@ SELECT true_count_before AS tc, COUNT(*) AS hands,
        ROUND(SUM(main_pl) / SUM(final_bet) * 100, 2) AS ev_pct
 FROM hands WHERE outcome <> 'abandoned' AND reshuffled_mid_round = 0
 GROUP BY true_count_before ORDER BY true_count_before;
+```
+
+or how you've done against each dealer:
+
+```sql
+SELECT dealer_name, COUNT(*) AS hands, ROUND(SUM(total_pl), 2) AS total_pl,
+       ROUND(SUM(main_pl) / SUM(final_bet) * 100, 2) AS ev_pct
+FROM hands WHERE outcome <> 'abandoned' AND dealer_name IS NOT NULL
+GROUP BY dealer_name ORDER BY total_pl DESC;
 ```
 
 #### Export, backup, and restore

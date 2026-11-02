@@ -175,7 +175,9 @@ if __name__ == "__main__":
     print(f"rows {rows_n} | resets {dict(resets)} | rounds {rounds} | failsafe rounds flagged {flagged_rounds} | mid_round shoe rows {mid_shoes}")
     check(q("pragma integrity_check")[0][0] == "ok", "integrity")
     check(q("pragma foreign_key_check") == [], "foreign keys")
-    check(q("pragma user_version")[0][0] == history.SCHEMA_VERSION == 4, "schema version")
+    check(q("pragma user_version")[0][0] == history.SCHEMA_VERSION == 5, "schema version")
+    unnamed = q("select (select count(*) from shoes where dealer_name is null) + (select count(*) from hands where dealer_name is null) c")[0]["c"]
+    check(unnamed == 0, f"every shoe and hand logged names its dealer ({unnamed} don't)")
 
     # 1. bankroll conservation
     bad = 0

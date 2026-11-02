@@ -22,6 +22,9 @@ if missing:
 
 from ui_support import FORCED_LAUNCHER, LEFT, REPO, RIGHT, SEEDED_LAUNCHER, Game
 
+sys.path.insert(0, str(REPO))
+from blackjack.dealers import STARTING_DEALERS  # noqa: E402
+
 fails = []
 
 
@@ -125,7 +128,7 @@ g.send(" ", 0.6)
 
 check(quit_game(g), "clean exit")
 c = db(home)
-check(c.execute("pragma integrity_check").fetchone()[0] == "ok" and c.execute("pragma user_version").fetchone()[0] == 4, "database intact, schema v4")
+check(c.execute("pragma integrity_check").fetchone()[0] == "ok" and c.execute("pragma user_version").fetchone()[0] == 5, "database intact, schema v5")
 rows = c.execute("select card_order, retired_at from shoes").fetchall()
 check(all("|" in r[0] and r[1] for r in rows), f"every shoe retired with its '|' marker ({len(rows)} shoes)")
 check(c.execute("select count(*) from hands").fetchone()[0] >= 3 and c.execute("select count(*) from hands where reshuffled_mid_round=1").fetchone()[0] == 0,
@@ -282,8 +285,8 @@ data_y, data_x = find(g, "┌─ DATA")
 right_edge = max(x for x, ch in enumerate(lines[games_y]) if ch == "┐")
 check(games_y == bank_y == banner_y + 2 and games_x == 21 and right_edge == 238 - 21 - 1, "the menus run from 1 inch (21 columns) in from each side")
 check("Transactions" in lines[bank_y + 4] and lines[bank_y + 5][bank_x] == "└" and data_y == bank_y + 7 and data_x == bank_x
-      and "Historical Session Data" in lines[data_y + 1] and "P/L Charts" in lines[data_y + 2],
-      "BANK ends right after Transactions; DATA starts below it: Historical Session Data, P/L Charts")
+      and "Historical Session Data" in lines[data_y + 1] and "P/L Charts" in lines[data_y + 2] and "P/L by Dealer" in lines[data_y + 3],
+      "BANK ends right after Transactions; DATA starts below it: Historical Session Data, P/L Charts, P/L by Dealer")
 games_bottom = next(y for y in range(games_y + 1, 60) if lines[y][games_x] == "└")
 check(games_bottom == 50 and lines[50][data_x] == "└", "GAMES and DATA end level, where the bottom 15% begins")
 check(not any(ch in line for line in lines[51:] for ch in "┌┐└┘│"), "the bottom 15% of the screen (the last 9 rows) holds no tables")
@@ -361,8 +364,11 @@ table = g.text()
 check("CLASSIC BLACKJACK — HISTORICAL SESSION DATA" in table and "1 session" in table and g.line_with("Main P/L") is not None,
       "...then shows that game's sessions: the totals and the table")
 g.send("\r", 0.8)
-check(g.line_with("SESSION #") is not None and g.line_with("Max drawdown") is not None and g.line_with("Dealer busts") is not None,
-      "Enter on a session opens its detail")
+dealt_line = g.line_with("Dealt by")
+dealt_by = dealt_line.split("Dealt by", 1)[1].split()[0].strip(",") if dealt_line else None
+check(g.line_with("SESSION #") is not None and g.line_with("Max drawdown") is not None and g.line_with("Dealer busts") is not None
+      and dealt_by in STARTING_DEALERS,
+      f"Enter on a session opens its detail, with who dealt it ({dealt_by})")
 g.send("\x1b", 0.6)
 g.send("\x1b", 0.8)
 check("Leave Casino" in g.text() and "SESSION" not in g.text(), "Esc closes the detail, then the table")
@@ -374,6 +380,17 @@ chart = g.text()
 check("CLASSIC BLACKJACK — LIFETIME P/L" in chart and "round 1" in chart and "now " in chart
       and any(0x2800 < ord(ch) <= 0x28FF for ch in chart) and "┈" in chart,
       "...then draws its P/L line, the $0 line, and the round axis")
+g.send("\x1b", 0.8)
+check("Leave Casino" in g.text(), "Esc goes back to the floor")
+g.send(DOWN, 0.4)
+g.send("\r", 0.8)
+check("P/L BY DEALER" in g.text(), "P/L by Dealer asks which game too")
+g.send("\r", 1.2)
+board = g.text()
+row = g.line_with(f"  {dealt_by}  ") if dealt_by else None
+check("CLASSIC BLACKJACK — P/L BY DEALER" in board and "1 dealer" in board and g.line_with("Sessions") is not None
+      and row is not None and row.count("$") == 4,
+      f"...then that game's results dealer by dealer ({row})")
 g.send("\x1b", 0.8)
 check("Leave Casino" in g.text(), "Esc goes back to the floor")
 g.send(LEFT, 0.4)
@@ -438,9 +455,7 @@ check(g.wait_exit() and os.WEXITSTATUS(g.exit_status) == 0, "...and 'quit' close
 
 # =============================================================== H. the table: felt, crease, cards
 FELT, WHITE, BLUE_BACK, RED_BACK = "005f00", "ffffff", "005faf", "af0000"
-sys.path.insert(0, str(REPO))
 from blackjack import ui as bj_ui  # noqa: E402
-from blackjack.dealers import STARTING_DEALERS  # noqa: E402
 
 
 def cells(g):

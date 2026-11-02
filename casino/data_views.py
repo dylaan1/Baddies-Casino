@@ -1,6 +1,7 @@
 """The casino floor's DATA windows: choosing a game, then its Historical
-Session Data (a table of sessions, newest first, each with a detail view) or
-its P/L Chart (the running P/L, round by round, as a line). The figures come
+Session Data (a table of sessions, newest first, each with a detail view),
+its P/L Chart (the running P/L, round by round, as a line), or its P/L by
+Dealer (a table of every dealer's results, best first). The figures come
 from each game (casino/records.py); the marquee keeps moving behind every
 window.
 
@@ -14,7 +15,7 @@ from datetime import datetime
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from . import charts, tui
-from .records import PLHistory, RecordsError, SessionRecord, money, signed
+from .records import DealerRecord, DealerTable, PLHistory, RecordsError, SessionRecord, money, signed
 
 SESSION_COLUMNS = (  # heading, width, right-aligned
     ("Started", 16, False),
@@ -22,6 +23,18 @@ SESSION_COLUMNS = (  # heading, width, right-aligned
     ("Rounds", 6, True),
     ("Hands", 6, True),
     ("W-L-P", 12, True),
+    ("Wagered", 13, True),
+    ("Main P/L", 13, True),
+    ("Side P/L", 12, True),
+    ("Total P/L", 13, True),
+    ("EV", 8, True),
+)
+DEALER_COLUMNS = (  # heading, width, right-aligned
+    ("Dealer", 12, False),
+    ("Sessions", 8, True),
+    ("Rounds", 7, True),
+    ("Hands", 7, True),
+    ("W-L-P", 14, True),
     ("Wagered", 13, True),
     ("Main P/L", 13, True),
     ("Side P/L", 12, True),
@@ -58,8 +71,8 @@ def percent(ev: Optional[float]) -> str:
     return "-" if ev is None else f"{ev:+.1f}%"
 
 
-def _row(cells: Sequence[str]) -> str:
-    return "  ".join(c.rjust(w) if right else c.ljust(w) for c, (_, w, right) in zip(cells, SESSION_COLUMNS))
+def _row(cells: Sequence[str], columns=SESSION_COLUMNS) -> str:
+    return "  ".join(c.rjust(w) if right else c.ljust(w) for c, (_, w, right) in zip(cells, columns))
 
 
 def session_header() -> str:
@@ -90,6 +103,45 @@ def session_totals(records: List[SessionRecord]) -> str:
         f"{len(records):,} session{'s' if len(records) != 1 else ''}  ·  {sum(r.hands for r in records):,} hands  ·  "
         f"{sum(r.rounds for r in records):,} rounds  ·  wagered {money(wagered)}  ·  Total P/L {signed(total)}  ·  EV {ev}"
     )
+
+
+def dealer_header() -> str:
+    return _row([heading for heading, _, _ in DEALER_COLUMNS], DEALER_COLUMNS)
+
+
+def dealer_row(d: DealerRecord) -> str:
+    return _row([
+        d.name,
+        f"{d.sessions:,}",
+        f"{d.rounds:,}",
+        f"{d.hands:,}",
+        f"{d.won}-{d.lost}-{d.pushed}",
+        money(d.wagered),
+        signed(d.main_pl),
+        signed(d.side_pl),
+        signed(d.total_pl),
+        percent(d.ev),
+    ], DEALER_COLUMNS)
+
+
+def dealer_totals(table: DealerTable) -> str:
+    dealers = table.dealers
+    wagered = sum(d.wagered for d in dealers)
+    main = sum(d.main_pl for d in dealers)
+    return (
+        f"{len(dealers):,} dealer{'s' if len(dealers) != 1 else ''}  ·  {sum(d.hands for d in dealers):,} hands  ·  "
+        f"wagered {money(wagered)}  ·  Total P/L {signed(sum(d.total_pl for d in dealers))}  ·  "
+        f"EV {percent(main / wagered * 100 if wagered > 0 else None)}"
+    )
+
+
+def unrecorded_note(table: DealerTable) -> str:
+    """The play no dealer can be put against, or "" if there's none."""
+    if not table.unrecorded_hands:
+        return ""
+    n = table.unrecorded_hands
+    return (f"Not included: {n:,} hand{'s' if n != 1 else ''} from before dealers were recorded "
+            f"(Total P/L {signed(table.unrecorded_pl)}).")
 
 
 def session_detail(r: SessionRecord) -> List[Tuple[str, str]]:
@@ -262,6 +314,51 @@ def show_session_detail(win, floor, game, record: SessionRecord) -> None:
                 return
         elif ch in tui.BACK_KEYS + tui.ENTER_KEYS:
             return
+
+
+def show_dealers(win, floor, game, backdrop: Callable[[], None]) -> None:
+    """Every dealer's results, best total P/L first, in a table that scrolls
+    when there are more dealers than rows."""
+    title = f"{game.name.upper()} — P/L BY DEALER"
+    if game.dealers is None:
+        _message_window(win, floor, title, [f"{game.name} has no dealers."], backdrop)
+        return
+    try:
+        table = game.dealers()
+    except RecordsError as exc:
+        _message_window(win, floor, title, [str(exc)], backdrop)
+        return
+    note = unrecorded_note(table)
+    if not table.dealers:
+        _message_window(win, floor, title, [f"No {game.name} hands dealt by a named dealer yet."] + ([note] if note else []), backdrop)
+        return
+    lines = [dealer_row(d) for d in table.dealers]
+    top = 0
+    while True:
+        y, x, h, w = _full_window(win, floor, title)
+        rows = max(1, h - 6 - (2 if note else 0))
+        top = max(0, min(top, len(lines) - rows))
+        tui.put(win, y + 1, x, dealer_totals(table)[:w], curses.A_BOLD)
+        tui.put(win, y + 3, x, ("  " + dealer_header())[:w], curses.A_BOLD | curses.A_UNDERLINE)
+        for row, line in enumerate(lines[top : top + rows]):
+            tui.put(win, y + 4 + row, x, ("  " + line)[:w])
+        if note:
+            tui.put(win, y + h - 3, x, note[:w], curses.A_DIM)
+        more = ("▲ " if top > 0 else "  ") + ("▼" if top + rows < len(lines) else " ")
+        tui.put(win, y + h - 1, x, f"{more} ↑↓ PgUp/PgDn scroll   Esc, q or Enter to return", curses.A_DIM)
+        floor.marquee.draw(win)
+        win.refresh()
+        ch = tui.getch(win, floor.marquee)
+        scroll = {curses.KEY_UP: -1, curses.KEY_DOWN: 1, curses.KEY_PPAGE: -rows, curses.KEY_NPAGE: rows,
+                  curses.KEY_HOME: -len(lines), curses.KEY_END: len(lines)}
+        if ch in scroll:
+            top += scroll[ch]
+        elif ch in tui.BACK_KEYS + tui.ENTER_KEYS:
+            return
+        elif ch == curses.KEY_MOUSE:
+            event = tui.mouse()
+            if event is not None and tui.wheel(event[2]):
+                top += tui.wheel(event[2])
 
 
 def show_chart(win, floor, game, backdrop: Callable[[], None]) -> None:
