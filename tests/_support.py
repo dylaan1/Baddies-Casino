@@ -33,6 +33,7 @@ cb = lambda name: importlib.import_module("blackjack." + name)
 engine, rules_m, cards, history, persist, commands, stats_m, ui, bjbank = (
     cb(n) for n in ("engine", "rules", "cards", "history", "persist", "commands", "stats", "ui", "bank"))
 casino_bank = importlib.import_module("casino.bank")
+casino_records = importlib.import_module("casino.records")
 Phase = engine.Phase
 FULL = [cards.Card(r, s) for r in cards.RANKS for s in cards.SUITS]
 hilo = cards.hilo_value

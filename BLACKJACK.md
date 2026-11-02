@@ -29,33 +29,67 @@ the file, so running the installer again (after moving the repository, say)
 updates that block in place, and the file is backed up beside itself first
 whenever it changes.
 
-Across the top runs the **BADDIE'S CASINO** sign, on one line, in lime-green
-block letters one and a half times their original size (the half rows are
-drawn with half blocks, `▀` and `▄`). It always keeps some room on either
-side: in a window that can't fit it, the letters move closer together first,
-then the sign drops to its original size or smaller. Only a very narrow
-window stacks it as BADDIE'S over CASINO. Below it is a purple **Luxury
-Gaming and Amenities** banner with 3 inches clear on either side. Under them sit two
-menus side by side. Each runs from an inch in from its side of the screen
-toward the middle, and down to where the bottom 15% of the screen begins:
+A **marquee** runs round the very edge of the screen, like an old Vegas
+sign: a light in every third outer cell (two dark cells between each),
+alternating bright green and bright red, all chasing clockwise one cell at a
+time. The corners stay dark, and so do a few cells beside them when the
+window's size needs it, so the green/red pattern always comes round evenly.
+The lights keep moving behind every window the floor opens.
 
-- **Games** — every game in the casino (**Classic Blackjack**, for now).
-  Picking one launches it exactly as `python3 -m blackjack` does.
-- **Bank** — **Account Summary** (your balance, what each game has won, and
-  your total deposits and withdrawals), **Deposit**, **Withdraw** (up to your
-  balance), and **Transactions** (every deposit and withdrawal, newest first).
+Inside it, after a blank row, runs the **BADDIE'S CASINO** sign, on one line,
+in lime-green block letters one and a half times their original size (the
+half rows are drawn with half blocks, `▀` and `▄`). It always keeps some room
+on either side: in a window that can't fit it, the letters move closer
+together first, then the sign drops to its original size or smaller. Only a
+very narrow window stacks it as BADDIE'S over CASINO. Below it is a
+lime-green banner reading **Luxury Gaming & Amenities | Making Your Dreams
+Come True One Bet At A Time** in black, with 3 inches clear on either side.
+Under them sit the menus, the left one and the right pair each running from
+an inch in from its side of the screen toward the middle, and down to where
+the bottom 15% of the screen begins:
 
-The bottom of the screen holds your balance, the keys, and, on the last
-line, the intellectual-property notice (wrapped onto more lines only if the
-window is too narrow for it). A terminal can't measure inches, so the floor
+- **Games** (left) — every game in the casino (**Classic Blackjack**, for
+  now). Picking one launches it exactly as `python3 -m blackjack` does.
+- **Bank** (top right, just tall enough for its options) — **Account
+  Summary** (your balance, what each game has won, and your total deposits and
+  withdrawals), **Deposit**, **Withdraw** (up to your balance), and
+  **Transactions** (every deposit and withdrawal, newest first).
+- **Data** (below Bank) — **Historical Session Data** and **P/L Charts**. Each
+  first asks which game (a short list, which scrolls once there are more
+  games than fit), then opens a window over the floor:
+  - **Historical Session Data**: the game's lifetime totals (sessions, hands,
+    rounds, wagered, total P/L, EV), then a table of every session that had a
+    hand in it, newest first — start, length, rounds, hands, W-L-P, wagered,
+    main P/L, side-bet P/L, total P/L, EV. Enter (or a second click) on a
+    session opens its full detail; for blackjack that adds surrenders,
+    doubles, splits, blackjacks, dealer 21s and busts, the longest streaks,
+    shoes played, the session's max drawdown, its biggest hand win and loss,
+    and how it ended.
+  - **P/L Charts**: a line chart of the game's running P/L (main and side
+    bets together), round by round from $0 at its first recorded round,
+    drawn in fine braille dots: dollar labels up the side, a dotted $0 line,
+    round numbers and dates along the bottom, and the number of rounds, the
+    dates covered, and the current, highest, and lowest P/L above it. Play
+    an older version counted only as lifetime totals can't be charted round
+    by round, so it's noted underneath instead (for blackjack, the imported
+    pre-database P/L).
+
+  These read each game's own history read-only, so they never change what's
+  recorded, and a game open in another terminal carries on undisturbed.
+
+The bottom of the screen holds your balance, the keys, and, on the row just
+above the marquee, the intellectual-property notice on a purple strip the
+length of its text (wrapped onto more lines only if the window is too narrow
+for it). A terminal can't measure inches, so the floor
 converts them to columns with `COLUMNS_PER_INCH` in `casino/floor.py`: 21,
 for Monaco 10 pt on a 13-inch MacBook Pro at its default scaling. Change it
 if you use a different font size or display scaling.
 
 | Key / mouse | Does |
 |---|---|
-| ↑ / ↓ (also PgUp/PgDn, Home/End) | Move through a menu. The highlight stops at the first and last option, and a longer menu scrolls to keep it in view |
-| ← / → or Tab / Shift-Tab | Switch between the Games and Bank menus |
+| ↑ / ↓ (also PgUp/PgDn, Home/End) | Move through a menu. The highlight stops at the first and last option, and a longer menu scrolls to keep it in view — except that ↓ on Bank's last option carries on into Data, and ↑ on Data's first back into Bank |
+| ← / → | Switch sides: Games, or the Bank/Data menu you last used |
+| Tab / Shift-Tab | Go round all three menus |
 | Enter (or Space) | Pick the highlighted option |
 | Click an option | Highlight it; click it again to pick it |
 | Click anywhere off the menus (or Esc) | Clear the highlight. Any arrow key, or a click on an option, brings it back |
@@ -790,7 +824,13 @@ table, so there's no separate command to look them up.
 |---|---|
 | `../bin/casino`, `../bin/blackjack` | Launchers the `casino` / `blackjack` shell aliases run: each game from any folder, without changing it |
 | `../bin/install-aliases` | Adds those aliases to `~/.zshrc` (or `--rc FILE`), in one marked, backed-up block |
-| `../casino/floor.py` | The casino floor (`python3 -m casino`, via `../casino/__main__.py`): the sign, the Games and Bank menus, launching a game |
+| `../casino/floor.py` | The casino floor (`python3 -m casino`, via `../casino/__main__.py`): the sign, the banner, the Games / Bank / Data menus, launching a game |
+| `../casino/marquee.py` | The marquee lights chasing clockwise round the screen's edge |
+| `../casino/data_views.py` | The Data windows: choosing a game, its Historical Session Data (table and session detail), its P/L Chart |
+| `../casino/charts.py` | Braille line charts (pure text) |
+| `../casino/records.py` | What a game hands the Data menu: its sessions, and its P/L round by round |
+| `../casino/tui.py` | The floor's shared curses pieces: colors, boxes, scrolling lists, waiting for a key while the marquee moves |
+| `records.py` | Blackjack's sessions and round-by-round P/L for the Data menu, read-only from the history database |
 | `../casino/bank.py` | The casino bank: the shared bankroll in `~/.baddies-casino/bank.json` (atomic, locked writes; deposits, withdrawals, and winnings per game) |
 | `bank.py` | Blackjack's link to the casino bank: opening it, and carrying blackjack's old bankroll into it the first time |
 | `cards.py` | `Card`, `Shoe` (shuffling, drawing, Hi-Lo running/true count) |
@@ -829,11 +869,11 @@ CSBJ_FULL=1 python3 -m unittest discover -s tests   # also the mutation check an
 | `check_history_reshuffle.py` | How the log records a round that ran the shoe dry (start shoe, the `reshuffled_mid_round` flag, the exact cards of both shoes), and upgrades of older database versions |
 | `check_stats_and_import.py` | Every lifetime and session figure comes from the database; the one-time import of an older game's stats (including negative figures); `newsession`, `bank reset`, and `--db` |
 | `check_launchers.py` | The shell aliases: the launchers from another folder (a same-named module there isn't picked up instead), and the installer (added once, updated in place, backed up, written through a symlink, the rest of the file untouched, the aliases working in zsh) |
-| `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, blackjack's bank commands and results landing in the right column, and the floor's menus, focus, clicks, and bank options |
+| `check_casino.py` | The casino bank (the balance rule, two programs sharing it, a failed write, a corrupt file), blackjack's old bankroll moving in exactly once and never being lost, blackjack's bank commands and results landing in the right column, the floor's layout, menus (Bank flowing into Data), focus, clicks, and bank options, the marquee (a light every third outer cell at every window size, alternating with no seam, moving clockwise), the line chart, and blackjack's records read back exactly and read-only |
 | `check_data_safety.py` | `export`, `backup`, `restore` (and rejecting bad backups), crash recovery, corrupt or newer files, atomic saves, and playing on with no database |
 | `check_locked_db.py` | Another program holding the database: nothing is dropped or mis-attributed, and it all lands, in order, once the lock lifts |
 | `check_audit.py` | Thousands of random rounds with the log attached, checked against ground truth: bankroll conservation, the casino bank getting exactly the table's P/L, the exact cards dealt, every stat against an independent implementation, the running counts |
-| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, the casino floor by keyboard and mouse (blackjack launched from it, the bank options), and both games started from another folder through the aliases' launchers. Needs `pip install pyte`; skipped without it |
+| `check_ui.py` | The real screen in a pseudo-terminal: the deck rules and their messages, a mid-hand reshuffle on screen, what's saved on quit / `SIGTERM` / `SIGHUP`, the casino floor by keyboard and mouse (its colors and margins, the marquee lit and chasing clockwise, blackjack launched from it, the bank options, both Data windows), and both games started from another folder through the aliases' launchers. Needs `pip install pyte`; skipped without it |
 | `tools/mutation_check.py` | Injects known bugs and confirms the checks above fail for each — a check that can't fail proves nothing |
 | `tools/consumption.py`, `tools/montecarlo.py`, `tools/adversary.py` | The measurements behind the minimum-cards floors: cards used per round, crash / failsafe rates per configuration over millions of rounds, and a search over every legal line of play (run them directly; `--help`-style usage is in each file's docstring) |
 
